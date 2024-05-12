@@ -20,11 +20,28 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#ffffff",
+        "googleServicesFile": "./google-services.json",
+        "package": "com.dondeSalimos.findplace",
+        "googleMapsApiKey": "AIzaSyAL4LmZzNhV_UNJSLI_Z7xjcN6wau7sNy8"
       }
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow DondeSalimos to use your location."
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": ["path/to/file.ttf"]
+        }
+      ]
+    ]
   }
 }
