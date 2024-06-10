@@ -17,7 +17,7 @@ export default function CategoryList({setSelectedCategory}) {
       id:2,
       name: 'Boliches',
       value:'night_club',
-      keyword:'dance',
+      keyword:'salsa,night_club',
       icon:require('./../../assets/categorias/bailando.png')
     }
   ]

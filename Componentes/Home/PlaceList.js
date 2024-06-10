@@ -1,8 +1,13 @@
-import { View, Text, FlatList } from 'react-native'
+import { View, Text, FlatList, TouchableOpacity } from 'react-native'
 import React from 'react'
 import PlaceItem from './PlaceItem'
+import { useNavigation } from '@react-navigation/native'
 
 export default function PlaceList({placeList}) {
+  const navigator = useNavigation();
+  const onPlaceClick=(item)=>{
+   navigator.navigate('place-detail',{place:item});
+  }
   return (
     <View>
       <Text
@@ -12,7 +17,9 @@ export default function PlaceList({placeList}) {
       <FlatList
       data={placeList}
       renderItem={({item})=>(
-        <PlaceItem place={item}  />
+         <TouchableOpacity onPress ={()=>onPlaceClick(item)}>
+        {<PlaceItem place={item}  />  }
+        </TouchableOpacity>
       )}
       
       
