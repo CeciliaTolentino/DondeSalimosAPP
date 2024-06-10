@@ -7,8 +7,7 @@ export default function Headers() {
       <Image source={require('../../img/logo4color.png')}
       style={styles.logo}/>
       <View>
-      <TextInput placeholder='Search' 
-      style={styles.searchBar}/>
+     
       </View>
     </View>
   )
@@ -31,7 +30,8 @@ const styles = StyleSheet.create({
         display:'flex',
         flexDirection:'row',
         alignItems:'baseline',
-        gap:10
+        gap:10,
+        marginTop:30
        
     }
 })

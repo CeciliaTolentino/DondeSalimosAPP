@@ -1,11 +1,12 @@
-import { View, Text } from 'react-native'
+
 import React from 'react'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
-import Home from '../Pantallas/Home';
+
 import Fav from '../Pantallas/Fav';
 import Search from '../Pantallas/Search';
 import Profile from '../Pantallas/Profile';
 import { MaterialIcons } from '@expo/vector-icons';
+import HomeNavigation from './HomeNavigation';
 
 
 
@@ -41,10 +42,10 @@ export default function TabNavigation() {
         tabBarActiveTintColor: '#7f00b2',
         tabBarInactiveTintColor: '#af9eab',
       })}>
-        <Tab.Screen name="Home" component={Home} />
-        <Tab.Screen name="Search" component={Search} />
-        <Tab.Screen name="Fav" component={Fav} />
-        <Tab.Screen name="Profile" component={Profile} />
+        <Tab.Screen name="Home" component={HomeNavigation}  options={{ headerShown: false }}/>
+        <Tab.Screen name="Search" component={Search} options={{ headerShown: false }}/>
+        <Tab.Screen name="Fav" component={Fav} options={{ headerShown: false }} />
+        <Tab.Screen name="Profile" component={Profile} options={{ headerShown: false }} />
       </Tab.Navigator>
     
   )
