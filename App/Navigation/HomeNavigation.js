@@ -1,4 +1,3 @@
-import { View, Text } from 'react-native'
 import React from 'react'
 import { TransitionPresets, createStackNavigator } from '@react-navigation/stack'
 import Home from '../Pantallas/Home'

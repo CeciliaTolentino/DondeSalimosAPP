@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Feather } from '@expo/vector-icons';
 import GoogleMapView from '../Home/GoogleMapView';
 import Share from './../../App/Servicios/Share'
+const key = process.env.EXPO_PUBLIC_API_KEY;
 export default function PlaceDetailItem({place,onDirectionClick}) {
   return (
     <View>
@@ -26,7 +27,7 @@ export default function PlaceDetailItem({place,onDirectionClick}) {
         "?maxwidth=400"+
         "&photo_reference="+
         place?.photos[0]?.photo_reference +
-        "&key=AIzaSyAL4LmZzNhV_UNJSLI_Z7xjcN6wau7sNy8",
+        "&key="+key,
       }} 
       style={{width:350,height:200, borderRadius:15, marginTop:10}}  />)
       :null  }

@@ -23,7 +23,7 @@
         "backgroundColor": "#ffffff",
         "googleServicesFile": "./google-services.json",
         "package": "com.dondeSalimos.findplace",
-        "googleMapsApiKey": "AIzaSyAL4LmZzNhV_UNJSLI_Z7xjcN6wau7sNy8"
+        "googleMapsApiKey": "AIzaSyAqOOWzUsCRcLrWs7DQMmxNoKrO96yk8r4"
       }
     },
     "web": {

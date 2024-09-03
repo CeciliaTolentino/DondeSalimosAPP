@@ -6,9 +6,7 @@ export default function Headers() {
     <View style={styles.header}>
       <Image source={require('../../img/logo4color.png')}
       style={styles.logo}/>
-      <View>
-     
-      </View>
+      
     </View>
   )
 }
@@ -18,20 +16,13 @@ const styles = StyleSheet.create({
         width:50,
         height:50
     },
-    searchBar:{
-        borderWidth:1,
-        borderColor:'#7f00b2',
-        padding:4,
-        borderRadius:50,
-        paddingLeft:10,
-        width:Dimensions.get('screen').width*0.7
-    },
+    
     header:{
         display:'flex',
         flexDirection:'row',
         alignItems:'baseline',
         gap:10,
-        marginTop:30
+        marginTop:20
        
     }
 })

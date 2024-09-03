@@ -21,13 +21,14 @@ export default function GoogleMapView({placeList }) {
       }
     },[location]);
   return (
-    <View style={{marginTop:20, borderRadius:20,overflow:'hidden'}}>
+    <View style={{marginTop:20, borderRadius:40,overflow:'hidden'}}>
       <Text style={{fontSize:20,marginBottom:10,fontWeight:"600",fontFamily:'roboto_regular'}}> </Text>
+      <View style={{ borderRadius: 40, overflow: 'hidden' }}>
       {mapRegion.latitude && mapRegion.longitude && (
         <MapView
           style={{
             width:Dimensions.get('screen').width*0.89,
-            height:Dimensions.get('screen').width*0.53, 
+            height:Dimensions.get('screen').width*0.83, 
           }}
           provider={PROVIDER_GOOGLE}
           showsUserLocation={true}
@@ -45,6 +46,7 @@ export default function GoogleMapView({placeList }) {
 ))}
         </MapView>
       )}
+    </View>
     </View>
   )
 }

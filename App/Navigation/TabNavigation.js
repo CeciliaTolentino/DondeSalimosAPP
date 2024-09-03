@@ -4,13 +4,13 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 
 import Fav from '../Pantallas/Fav';
 import Search from '../Pantallas/Search';
-import Profile from '../Pantallas/Profile';
 import { MaterialIcons } from '@expo/vector-icons';
 import HomeNavigation from './HomeNavigation';
-
-
-
+import Login from '../Pantallas/Login';
+//import useGoogleAuth from '../../Componentes/Login/useGoogleAuth';
+import onGoogleButtonPress from '../../Componentes/Login/setUp'
 export default function TabNavigation() {
+ const { promptAsync } = onGoogleButtonPress(); // Obtén promptAsync desde useGoogleAuth
     const Tab = createBottomTabNavigator();
   return (
    
@@ -28,7 +28,7 @@ export default function TabNavigation() {
                     case 'Fav':
                         iconName = 'favorite';
                         break;
-                        case 'Profile':
+                        case 'Login':
                             iconName = 'login';
                             break;
                             default:
@@ -45,7 +45,9 @@ export default function TabNavigation() {
         <Tab.Screen name="Home" component={HomeNavigation}  options={{ headerShown: false }}/>
         <Tab.Screen name="Search" component={Search} options={{ headerShown: false }}/>
         <Tab.Screen name="Fav" component={Fav} options={{ headerShown: false }} />
-        <Tab.Screen name="Profile" component={Profile} options={{ headerShown: false }} />
+        <Tab.Screen name="Login">
+                {() => <Login promptAsync={promptAsync} />} 
+            </Tab.Screen>
       </Tab.Navigator>
     
   )
