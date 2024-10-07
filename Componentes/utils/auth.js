@@ -1,27 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
-import { CommonActions } from '@react-navigation/native';
 
-export const saveUserData = async (userData) => {
-  try {
-    await AsyncStorage.setItem('userData', JSON.stringify(userData));
-    console.log('Datos del usuario guardados:', userData);
-  } catch (error) {
-    console.error('Error al guardar los datos del usuario:', error);
-    throw error;
-  }
-};
+let userDataCache = null;
+let isCheckingUser = false;
+let lastCheckTime = 0;
+const CHECK_INTERVAL = 5000; // 5 segundos
 
-
-export const getUserData = async () => {
-  try {
-    const userData = await AsyncStorage.getItem('userData');
-    return userData ? JSON.parse(userData) : null;
-  } catch (error) {
-    console.error('Error al obtener los datos del usuario:', error);
-    return null;
-  }
-};
 export const checkUserAuthentication = async () => {
   try {
     const userData = await getUserData();
@@ -36,99 +20,100 @@ export const checkUserAuthentication = async () => {
     return false;
   }
 };
-export const showAuthenticationAlert = (navigation) => {
-  Alert.alert(
-    "Acceso Restringido",
-    "Para acceder a esta funcionalidad, debe estar registrado/a.",
-    [
-      { 
-        text: "Registrarse", 
-        onPress: () => {
-          navigation.dispatch(
-            CommonActions.reset({
-              index: 0,
-              routes: [{ name: 'Login' }],
-            })
-          );
-        }
-      },
-      {
-        text: "Cancelar",
-        style: "cancel"
-      }
-    ]
-  );
+
+
+
+export const clearUserData = async () => {
+  try {
+    await AsyncStorage.removeItem('userData');
+    userDataCache = null;
+    console.log('Datos del usuario eliminados');
+  } catch (error) {
+    console.error('Error al eliminar los datos del usuario:', error);
+  }
 };
+
+
+
+export const saveUserData = async (userData) => {
+  try {
+    const existingData = await getUserData();
+    const updatedData = { ...existingData, ...userData };
+    await AsyncStorage.setItem('userData', JSON.stringify(updatedData));
+    console.log('Datos del usuario guardados:', updatedData);
+  } catch (error) {
+    console.error('Error al guardar los datos del usuario:', error);
+  }
+};
+
+export const getUserData = async () => {
+  try {
+    const userData = await AsyncStorage.getItem('userData');
+    return userData ? JSON.parse(userData) : null;
+  } catch (error) {
+    console.error('Error al obtener datos del usuario:', error);
+    return null;
+  }
+};
+
+export const setUserLoggedIn = async () => {
+  try {
+    const userData = await getUserData();
+    if (userData) {
+      userData.isLoggedIn = true;
+      await saveUserData(userData);
+    }
+  } catch (error) {
+    console.error('Error al establecer usuario como conectado:', error);
+  }
+};
+
 export const setUserLoggedOut = async () => {
   try {
     const userData = await getUserData();
     if (userData) {
       userData.isLoggedIn = false;
-      await AsyncStorage.setItem('userData', JSON.stringify(userData));
+      await saveUserData(userData);
     }
-    console.log('Estado de sesión actualizado: usuario desconectado');
   } catch (error) {
-    console.error('Error al actualizar el estado de sesión:', error);
+    console.error('Error al establecer usuario como desconectado:', error);
   }
 };
 
-export const setUserLoggedIn = async (userId) => {
-  try {
-    const userData = await getUserData();
-    if (userData && userData.googleId === userId) {
-      userData.isLoggedIn = true;
-      await saveUserData(userData);
-      return userData;
-    }
-    return null;
-  } catch (error) {
-    console.error('Error al actualizar el estado de sesión:', error);
-    return null;
-  }
-};
 export const savePendingApproval = async (userData) => {
   try {
-    const pendingApprovals = await AsyncStorage.getItem('pendingApprovals') || '[]';
-    const approvals = JSON.parse(pendingApprovals);
-    approvals.push(userData);
-    await AsyncStorage.setItem('pendingApprovals', JSON.stringify(approvals));
-    console.log('Solicitud de aprobación guardada:', userData);
+    let pendingApprovals = await AsyncStorage.getItem('pendingApprovals');
+    pendingApprovals = pendingApprovals ? JSON.parse(pendingApprovals) : [];
+    pendingApprovals.push(userData);
+    await AsyncStorage.setItem('pendingApprovals', JSON.stringify(pendingApprovals));
   } catch (error) {
-    console.error('Error al guardar la solicitud de aprobación:', error);
-    throw error;
+    console.error('Error al guardar solicitud pendiente:', error);
   }
 };
 
 export const getPendingApprovals = async () => {
   try {
-    const pendingApprovals = await AsyncStorage.getItem('pendingApprovals') || '[]';
-    return JSON.parse(pendingApprovals);
+    const pendingApprovals = await AsyncStorage.getItem('pendingApprovals');
+    return pendingApprovals ? JSON.parse(pendingApprovals) : [];
   } catch (error) {
-    console.error('Error al obtener las solicitudes de aprobación:', error);
+    console.error('Error al obtener solicitudes pendientes:', error);
     return [];
   }
 };
 
-export const updateApprovalStatus = async (userId, isApproved) => {
+export const updateApprovalStatus = async (googleId, isApproved) => {
   try {
-    const pendingApprovals = await getPendingApprovals();
-    const userIndex = pendingApprovals.findIndex(user => user.googleId === userId);
-    
-    if (userIndex !== -1) {
-      const userData = pendingApprovals[userIndex];
+    const userData = await getUserData();
+    if (userData && userData.googleId === googleId) {
       userData.approved = isApproved;
       await saveUserData(userData);
-      
-      pendingApprovals.splice(userIndex, 1);
-      await AsyncStorage.setItem('pendingApprovals', JSON.stringify(pendingApprovals));
-      
-      console.log('Estado de aprobación actualizado para el usuario:', userId, 'Aprobado:', isApproved);
-    } else {
-      console.log('No se encontraron datos de usuario para actualizar:', userId);
     }
+
+    let pendingApprovals = await getPendingApprovals();
+    pendingApprovals = pendingApprovals.filter(bar => bar.googleId !== googleId);
+    await AsyncStorage.setItem('pendingApprovals', JSON.stringify(pendingApprovals));
   } catch (error) {
     console.error('Error al actualizar el estado de aprobación:', error);
     throw error;
   }
 };
-

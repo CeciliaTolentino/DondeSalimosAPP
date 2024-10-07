@@ -37,6 +37,7 @@ export const AuthProvider = ({ children }) => {
       isApproved: userData?.approved,
     });
   };
+
   const clearAuth = async () => {
     try {
       const userData = await AsyncStorage.getItem('userData');

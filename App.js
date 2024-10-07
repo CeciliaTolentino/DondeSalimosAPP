@@ -8,7 +8,7 @@ import { UserLocationContext } from './App/Context/UserLocationContext';
 import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider } from './AuthContext';
-// ... otros imports
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -16,6 +16,7 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
 const Stack = createNativeStackNavigator();
 
 // Pantalla de carga inicial
@@ -68,29 +69,28 @@ function App() {
 
   return (
     <AuthProvider>
-    <UserLocationContext.Provider value={{ location, setLocation }}>
-      <NavigationContainer>
-        <Stack.Navigator>
-          <Stack.Screen
-            name="SplashScreen"
-            component={SplashScreen}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="TabNavigation"
-            component={TabNavigation}
-            options={{ headerShown: false }}
-          />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </UserLocationContext.Provider>
+      <UserLocationContext.Provider value={{ location, setLocation }}>
+        <NavigationContainer>
+          <Stack.Navigator>
+            <Stack.Screen
+              name="SplashScreen"
+              component={SplashScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="TabNavigation"
+              component={TabNavigation}
+              options={{ headerShown: false }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </UserLocationContext.Provider>
     </AuthProvider>
   );
 }
 
 export default App;
 
-// Estilos
 const styles = StyleSheet.create({
   container: {
     flex: 1,

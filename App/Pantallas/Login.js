@@ -21,8 +21,6 @@ import {
   saveUserData, 
   getUserData, 
   savePendingApproval, 
-  updateApprovalStatus,
-  checkUserAuthentication,
   setUserLoggedOut,
   setUserLoggedIn
 } from './../../Componentes/utils/auth';
@@ -56,20 +54,18 @@ export default function Login() {
     try {
       const userData = await getUserData();
       if (userData && userData.isLoggedIn) {
-        const isAuthenticated = await checkUserAuthentication();
-        if (isAuthenticated) {
-          setUser(userData);
-          updateAuth(userData);
-        } else {
-          await handleLogout();
-        }
+        setUser(userData);
+        updateAuth(userData);
+      } else {
+        setUser(null);
+        clearAuth();
       }
       setInitializing(false);
     } catch (error) {
       console.error('Error al verificar el usuario actual:', error);
       setInitializing(false);
     }
-  }, [updateAuth, handleLogout]);
+  }, [updateAuth, clearAuth]);
 
   function onAuthStateChanged(firebaseUser) {
     setInitializing(false);
@@ -133,7 +129,8 @@ export default function Login() {
           photoURL: googleUser.photo,
           name: googleUser.name,
           approved: true,
-          isLoggedIn: true
+          isLoggedIn: true,
+          isRegistered: true
         };
         await saveUserData(adminData);
         setUser(adminData);
@@ -143,23 +140,33 @@ export default function Login() {
       }
   
       if (!userData || userData.googleId !== userId) {
-        setIsRegistering(true);
-        setUser({ 
+        const newUserData = { 
           uid: userId, 
           email, 
           photoURL: googleUser.photo, 
-          name: googleUser.name,
-          givenName: googleUser.givenName,
-          familyName: googleUser.familyName,
+          name: googleUser.givenName,
+          lastName: googleUser.familyName,
           googleId: userId,
-          isLoggedIn: false
-        });
+          isLoggedIn: true,
+          userType: 'commonUser',
+          isRegistered: false
+        };
+        await saveUserData(newUserData);
+        setUser(newUserData);
+        updateAuth(newUserData);
+        setIsRegistering(true);
       } else {
-        userData.isLoggedIn = true;
-        await saveUserData(userData);
-        setUser(userData);
-        updateAuth(userData);
-        setIsRegistering(false);
+        const updatedUserData = {
+          ...userData,
+          isLoggedIn: true,
+          photoURL: googleUser.photo || userData.photoURL,
+          name: googleUser.givenName || userData.name,
+          lastName: googleUser.familyName || userData.lastName,
+        };
+        await saveUserData(updatedUserData);
+        setUser(updatedUserData);
+        updateAuth(updatedUserData);
+        setIsRegistering(!updatedUserData.isRegistered);
       }
     } catch (error) {
       console.error('Error en checkUserRegistration:', error);
@@ -175,15 +182,14 @@ export default function Login() {
     }
 
     const userData = {
-      googleId: user.uid,
-      email: user.email,
-      photoURL: user.photoURL,
+      ...user,
       name,
       lastName,
       userType: isBarOwner ? 'barOwner' : 'commonUser',
       isBarOwner,
       approved: !isBarOwner,
       isLoggedIn: true,
+      isRegistered: true,
       ...(isBarOwner && { 
         barName, 
         barType,
@@ -221,7 +227,7 @@ export default function Login() {
           <Image source={require('../../img/login.png')} style={styles.logo}/>
         )}
         <View style={styles.tarjeta}>
-          {!user && !isRegistering ? (
+          {!user ? (
             <View style={styles.buttonContainer}>
               <TouchableOpacity style={styles.cajaBoton} onPress={() => onGoogleButtonPress(false)}>
                 <Text style={styles.Textoboton}>Iniciar sesión con Google</Text>
@@ -230,14 +236,22 @@ export default function Login() {
                 <Text style={styles.Textoboton}>Registrarse con Google</Text>
               </TouchableOpacity>
             </View>
-          ) : user && user.userType === 'admin' ? (
+          ) : user.isRegistered ? (
             <View style={styles.userInfo}>
-              <Text style={styles.welcomeText}>Bienvenida, Administradora</Text>
+              {user.photoURL ? (
+                <Image source={{ uri: user.photoURL }} style={styles.userPhoto} />
+              ) : (
+                <View style={[styles.userPhoto, styles.placeholderPhoto]}>
+                  <Text style={styles.placeholderText}>{user.name ? user.name[0].toUpperCase() : '?'}</Text>
+                </View>
+              )}
+              <Text style={styles.welcomeText}>Hola, {user.name} {user.lastName}!</Text>
+              <Text style={styles.userTypeText}>Tipo de usuario: {user.userType}</Text>
               <TouchableOpacity style={styles.cajaBoton} onPress={handleLogout}>
                 <Text style={styles.Textoboton}>Cerrar sesión</Text>
               </TouchableOpacity>
             </View>
-          ) : isRegistering ? (
+          ) : (
             <View style={styles.registrationForm}>
               <Text style={styles.formTitle}>Complete su registro</Text>
               <TextInput
@@ -307,17 +321,6 @@ export default function Login() {
               )}
               <TouchableOpacity style={styles.cajaBoton} onPress={handleRegistration}>
                 <Text style={styles.Textoboton}>Completar registro</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.userInfo}>
-              {user.photoURL && (
-                <Image source={{ uri: user.photoURL }} style={styles.userPhoto} />
-              )}
-              <Text style={styles.welcomeText}>Hola, {user.name}!</Text>
-              <Text style={styles.userTypeText}>Tipo de usuario: {user.userType}</Text>
-              <TouchableOpacity style={styles.cajaBoton} onPress={handleLogout}>
-                <Text style={styles.Textoboton}>Cerrar sesión</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -410,6 +413,15 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
     marginBottom: 10,
+  },
+  placeholderPhoto: {
+    backgroundColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    fontSize:  40,
+    color: '#fff',
   },
   welcomeText: {
     fontSize: 18,

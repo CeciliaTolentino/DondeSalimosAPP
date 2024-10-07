@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, SafeAreaView } from 'react-native';
-import { getPendingApprovals, updateApprovalStatus } from './../../Componentes/utils/auth';
+import { getPendingApprovals, updateApprovalStatus, saveUserData } from './../../Componentes/utils/auth';
+import ComercioInfoModal from './../../Componentes/Home/ComercioInfoModal';
 
 export default function AdminPanel() {
   const [pendingBars, setPendingBars] = useState([]);
+  const [selectedBar, setSelectedBar] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   useEffect(() => {
     loadPendingBars();
@@ -22,16 +25,31 @@ export default function AdminPanel() {
   const handleBarAction = async (item, isApproved) => {
     try {
       await updateApprovalStatus(item.googleId, isApproved);
+      
+      // Actualizar los datos del usuario
+      const updatedUserData = {
+        ...item,
+        approved: isApproved,
+        userType: 'barOwner'
+      };
+      await saveUserData(updatedUserData);
+
       Alert.alert('Éxito', `${item.barName} ha sido ${isApproved ? 'aprobado' : 'rechazado'}.`);
       loadPendingBars();
+      setModalVisible(false);
     } catch (error) {
       console.error('Error al procesar la solicitud del bar:', error);
       Alert.alert('Error', `No se pudo ${isApproved ? 'aprobar' : 'rechazar'} el bar.`);
     }
   };
 
+  const handleBarPress = (item) => {
+    setSelectedBar(item);
+    setModalVisible(true);
+  };
+
   const renderItem = ({ item }) => (
-    <View style={styles.item}>
+    <TouchableOpacity style={styles.item} onPress={() => handleBarPress(item)}>
       <View style={styles.itemContent}>
         <Text style={styles.itemTitle}>{item.barName}</Text>
         <Text style={styles.itemSubtitle}>{item.barType}</Text>
@@ -39,21 +57,7 @@ export default function AdminPanel() {
         <Text style={styles.itemDetails}>Dirección: {item.barAddress}</Text>
         <Text style={styles.itemDetails}>Horario: {item.openingHours} - {item.closingHours}</Text>
       </View>
-      <View style={styles.buttonContainer}>
-        <TouchableOpacity 
-          style={[styles.actionButton, styles.approveButton]} 
-          onPress={() => handleBarAction(item, true)}
-        >
-          <Text style={styles.buttonText}>Aprobar</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.actionButton, styles.rejectButton]} 
-          onPress={() => handleBarAction(item, false)}
-        >
-          <Text style={styles.buttonText}>Rechazar</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -71,53 +75,60 @@ export default function AdminPanel() {
           <Text style={styles.noDataText}>No hay bares pendientes de aprobación.</Text>
         </View>
       )}
+      <ComercioInfoModal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        barInfo={selectedBar}
+        onApprove={() => selectedBar && handleBarAction(selectedBar, true)}
+        onReject={() => selectedBar && handleBarAction(selectedBar, false)}
+      />
     </SafeAreaView>
   );
 }
 
-
-
 const styles = StyleSheet.create({
-container: {
-  flex: 1,
-  padding: 20,
-},
-title: {
-  fontSize: 24,
-  fontWeight: 'bold',
-  marginBottom: 20,
-},
-item: {
-  backgroundColor: '#f9f9f9',
-  padding: 20,
-  marginVertical: 8,
-  borderRadius: 5,
-},
-itemText: {
-  fontSize: 18,
-  marginBottom: 10,
-},
-buttonContainer: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-},
-button: {
-  padding: 10,
-  borderRadius: 5,
-  width: '48%',
-},
-approveButton: {
-  backgroundColor: 'green',
-},
-rejectButton: {
-  backgroundColor: 'red',
-},
-buttonText: {
-  color: 'white',
-  textAlign: 'center',
-},
-noApprovals: {
-  fontSize: 18,
-  textAlign: 'center',
-},
+  container: {
+    flex: 1,
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  item: {
+    backgroundColor: '#f9f9f9',
+    padding: 20,
+    marginVertical: 8,
+    borderRadius: 5,
+  },
+  itemContent: {
+    flex: 1,
+  },
+  itemTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  itemSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 5,
+  },
+  itemDetails: {
+    fontSize: 14,
+    color: '#888',
+  },
+  listContainer: {
+    flexGrow: 1,
+  },
+  noDataContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noDataText: {
+    fontSize: 18,
+    color: '#666',
+  },
 });
