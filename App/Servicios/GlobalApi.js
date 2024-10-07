@@ -12,12 +12,16 @@ const nearByPlace = (lat, lng, type, keyword, filters) => {
   };
   
  
-
-  const busquedaPorTxt=(busquedaTexto)=>axios.get(BASE_URL+"/textsearch/json?query=" + busquedaTexto+
-    "&key="+key)
+  const getDetallesLugar = (placeId) => axios.get(
+    BASE_URL + "/details/json?" +
+    "place_id=" + placeId +
+    "&fields=name,formatted_phone_number,website" +
+    "&key=" + key
+);
+  
 
 
 export default{
-    busquedaPorTxt,
+  getDetallesLugar,
     nearByPlace
 }

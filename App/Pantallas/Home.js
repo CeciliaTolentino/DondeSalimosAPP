@@ -1,55 +1,52 @@
-import { View, Text, ScrollView } from 'react-native';
-import React, { useContext, useEffect, useState } from 'react';
-import Headers from '../../Componentes/Home/Headers';
-import GoogleMapView from '../../Componentes/Home/GoogleMapView';
-import CategoryList from '../../Componentes/Home/CategoryList';
-import GlobalApi from '../Servicios/GlobalApi';
-import PlaceList from '../../Componentes/Home/PlaceList';
-import { UserLocationContext } from '../Context/UserLocationContext';
-import FiltersScreen from '../../Componentes/Home/Filterscreen';
+import React, { useContext, useState } from 'react'
+import { View, StyleSheet } from 'react-native'
+import GoogleMapViewFull from './../../Componentes/Home/GoogleMapViewFull'
+import GlobalApi from '../Servicios/GlobalApi'
+import { UserLocationContext } from '../Context/UserLocationContext'
 
 export default function Home() {
-  const [placeList, setPlaceList] = useState([]);
-  const { location } = useContext(UserLocationContext);
-  const [selectedFilters, setSelectedFilters] = useState([]);
-  const [selectedCategory, setSelectedCategoryState] = useState({ value: 'bar', keyword: '' });
+  const [placeList, setPlaceList] = useState([])
+  const [selectedPlace, setSelectedPlace] = useState(null)
+  const { location } = useContext(UserLocationContext)
 
-  useEffect(() => {
-    if (location) {
-      GetNearBySearchPlace(selectedCategory.value, selectedCategory.keyword, selectedFilters);
-    }
-  }, [location, selectedFilters, selectedCategory]);
+  const handleSearch = (type, keyword, filters) => {
+    GetNearBySearchPlace(type, keyword, filters)
+  }
 
-  const GetNearBySearchPlace = (value, keyword, filters) => {
-    console.log("Los filtros son: " +filters)
-    try {
-     
+  const GetNearBySearchPlace = (type = '', keyword = '', filters = '') => {
+    GlobalApi.nearByPlace(
+      location.coords.latitude,
+      location.coords.longitude,
+      type,
+      keyword,
+      filters
+    ).then(resp => {
+      const results = resp.data.results || []
+      setPlaceList(results)
+    }).catch(error => {
+      console.error("Error fetching nearby places:", error)
+      setPlaceList([])
+    })
+  }
 
-      const filterKeywords = Array.isArray(filters) ? filters.join(',') : '';
-
-      GlobalApi.nearByPlace(location.coords.latitude, location.coords.longitude, value, keyword, filterKeywords)
-        .then(resp => {
-          setPlaceList(resp.data.results);
-        })
-        .catch(error => {
-          console.error("Error fetching nearby places:", error);
-        });
-    } catch (error) {
-      console.error("Error fetching nearby places:", error);
-    }
-  };
-
-  const handleCategorySelection = (value, keyword) => {
-    setSelectedCategoryState({ value, keyword });
-  };
+  const handlePlaceSelect = (place) => {
+    setSelectedPlace(place)
+  }
 
   return (
-    <ScrollView style={{ padding: 20 }}>
-      <Headers />
-      <GoogleMapView placeList={placeList} />
-      <CategoryList setSelectedCategory={handleCategorySelection} />
-      <FiltersScreen selectedFilters={selectedFilters} setSelectedFilters={setSelectedFilters} />
-      {placeList.length > 0 && <PlaceList placeList={placeList} />}
-    </ScrollView>
-  );
+    <View style={styles.container}>
+      <GoogleMapViewFull 
+        placeList={placeList} 
+        onSearch={handleSearch}
+        selectedPlace={selectedPlace}
+        onPlaceSelect={handlePlaceSelect}
+      />
+    </View>
+  )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+})

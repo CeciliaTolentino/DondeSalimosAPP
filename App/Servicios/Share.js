@@ -1,13 +1,14 @@
 import { Share } from "react-native"
 
-const  SharePlace=(place)=>{
-   Share.share({
-    title:'Compartir comercio',
-    message: "Nombre del comercio: " + place.name 
-    + "\n" + "Dirección: "  +place.vicinity?place.vicinity:place.formatted_address,
-   })
+const SharePlace = (place) => {
+  if (!place) return
+
+  Share.share({
+    title: 'Compartir comercio',
+    message: `Nombre del comercio: ${place.name || 'No disponible'}\nDirección: ${place.vicinity || place.formatted_address || 'No disponible'}`,
+  })
 }
 
-export default{
-    SharePlace
+export default {
+  SharePlace
 }

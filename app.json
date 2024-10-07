@@ -2,6 +2,7 @@
   "expo": {
     "name": "dondeSalimos",
     "slug": "dondeSalimos",
+    "jsEngine": "jsc",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,16 +16,44 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.proyecto.dondeSalimos",
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": ["dondesalimos"]
+          }
+        ]
+      }
     },
     "android": {
+      "enableDangerousExperimentalLeanBuilds": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff",
-        "googleServicesFile": "./google-services.json",
-        "package": "com.dondeSalimos.findplace",
-        "googleMapsApiKey": "AIzaSyAqOOWzUsCRcLrWs7DQMmxNoKrO96yk8r4"
-      }
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.proyecto.dondeSalimos",
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAqOOWzUsCRcLrWs7DQMmxNoKrO96yk8r4"
+        }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "dondesalimos"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -39,10 +68,14 @@
       [
         "expo-font",
         {
-          "fonts": ["path/to/file.ttf"]
+          "fonts": [
+            "./assets/Fonts/Roboto-Bold.ttf",
+            "./assets/Fonts/Roboto-Regular.ttf"
+          ]
         }
-      ]
-    ]
+      ],
+      "@react-native-google-signin/google-signin"
+    ],
+    "scheme": "dondesalimos"
   }
-  
 }
