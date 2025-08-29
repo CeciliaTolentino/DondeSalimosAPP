@@ -8,7 +8,7 @@ const firebaseConfig = {
   projectId: "dondesalimos-bfe2b",
   storageBucket: "dondesalimos-bfe2b.appspot.com",
   messagingSenderId: "620861653759",
-  appId: "1:620861653759:android:92085f70e1e7e8e1ab02ca"
+  appId: "1:279280321644:android:4c94d00062298481c0c449"
 };
 
 if (!firebase.apps.length) {
@@ -16,7 +16,7 @@ if (!firebase.apps.length) {
 }
 
 GoogleSignin.configure({
-  webClientId: '620861653759-n7la2q029vi8vjl2r53v2g18lo8s0rlh.apps.googleusercontent.com',
+  webClientId: '279280321644-liu8o3o8imlgpcmffog559tijjuekusu.apps.googleusercontent.com',
 
   scopes: ['openid', 'email', 'profile'] // Añada esta línea
 });

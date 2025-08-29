@@ -26,7 +26,7 @@ const genres = [
   'metal',
   'cachengue',
   'cumbia',
-  'musica_ochentosa'
+  'rock'
 ]
 
 export default function CategoryFilter({ onSearch }) {

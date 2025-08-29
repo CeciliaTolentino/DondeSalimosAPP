@@ -1,11 +1,12 @@
-import React, { useContext, useEffect, useState, useRef } from 'react'
-import { View, Dimensions, StyleSheet } from 'react-native'
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'
-import { UserLocationContext } from '../../App/Context/UserLocationContext'
-import PlaceMarker from './PlaceMarker'
-import CategoryFilter from './CategoryFilter'
-import PlaceDetailModal from './PlaceDetailModal'
-import BarStories from './BarStories'
+
+import { useContext, useEffect, useState, useRef } from "react"
+import { View, Dimensions, StyleSheet } from "react-native"
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps"
+import { UserLocationContext } from "../../App/Context/UserLocationContext"
+import PlaceMarker from "./PlaceMarker"
+import CategoryFilter from "./CategoryFilter"
+import PlaceDetailModal from "./PlaceDetailModal"
+import BarStories from "./BarStories"
 
 export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, onPlaceSelect }) {
   const [mapRegion, setMapRegion] = useState(null)
@@ -38,7 +39,28 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
     }
   }, [selectedPlace])
 
+  // Agregar logs para debugging
+  useEffect(() => {
+    console.log("🗺️ GoogleMapViewFull - placeList actualizado:", placeList.length)
+    console.log("📍 Lugares por fuente:", {
+      google: placeList.filter((p) => !p.isLocal).length,
+      local: placeList.filter((p) => p.isLocal).length,
+    })
+
+    // Log detallado de cada lugar
+    placeList.forEach((place, index) => {
+      console.log(`📍 Lugar ${index + 1}:`, {
+        name: place.name,
+        isLocal: place.isLocal,
+        lat: place.geometry?.location?.lat,
+        lng: place.geometry?.location?.lng,
+        hasValidCoords: !!(place.geometry?.location?.lat && place.geometry?.location?.lng),
+      })
+    })
+  }, [placeList])
+
   const onMarkerPress = (place) => {
+    console.log("🎯 Marcador presionado:", place.name, place.isLocal ? "(Local)" : "(Google)")
     onPlaceSelect(place)
   }
 
@@ -47,6 +69,11 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
     if (mapRef.current && initialRegion) {
       mapRef.current.animateToRegion(initialRegion, 1000)
     }
+  }
+
+  const handleDirectionClick = (place) => {
+    // Implementar navegación a Google Maps o similar
+    console.log("🧭 Direcciones solicitadas para:", place.name)
   }
 
   return (
@@ -60,230 +87,259 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
           initialRegion={mapRegion}
           customMapStyle={mapStyle}
         >
+          {/* Marcador de ubicación del usuario */}
           <Marker
             coordinate={{
               latitude: mapRegion.latitude,
               longitude: mapRegion.longitude,
             }}
-            title={'Estás aquí'}
+            title={"Estás aquí"}
           />
-          {placeList.map((item, index) => (
-            <PlaceMarker 
-              key={index} 
-              item={item} 
-              onPress={() => onMarkerPress(item)}
-              isSelected={selectedPlace && selectedPlace.place_id === item.place_id}
-            />
-          ))}
+
+          {/* Marcadores de lugares */}
+          {placeList.map((item, index) => {
+            // Validar que el lugar tenga coordenadas válidas
+            if (
+              !item.geometry ||
+              !item.geometry.location ||
+              !item.geometry.location.lat ||
+              !item.geometry.location.lng
+            ) {
+              console.warn("⚠️ Lugar sin coordenadas válidas:", item.name)
+              return null
+            }
+
+            const lat = Number(item.geometry.location.lat)
+            const lng = Number(item.geometry.location.lng)
+
+            if (isNaN(lat) || isNaN(lng)) {
+              console.warn("⚠️ Coordenadas no numéricas:", item.name, { lat, lng })
+              return null
+            }
+
+            console.log(`🎯 Renderizando marcador ${index + 1}:`, item.name, { lat, lng })
+
+            return (
+              <PlaceMarker
+                key={item.place_id || `place_${index}`}
+                item={item}
+                onPress={() => onMarkerPress(item)}
+                isSelected={selectedPlace && selectedPlace.place_id === item.place_id}
+              />
+            )
+          })}
         </MapView>
       )}
+
       <CategoryFilter onSearch={onSearch} />
-      <PlaceDetailModal 
+
+      <PlaceDetailModal
         place={selectedPlace}
         visible={!!selectedPlace}
         onClose={handleModalClose}
+        onDirectionClick={handleDirectionClick}
       />
+
       <BarStories />
     </View>
   )
 }
-
-
 
 const styles = StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
   },
   map: {
-    width: Dimensions.get('screen').width,
-    height: Dimensions.get('screen').height,
+    width: Dimensions.get("screen").width,
+    height: Dimensions.get("screen").height,
   },
 })
+
 const mapStyle = [
   {
-    "elementType": "geometry",
-    "stylers": [
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#1a1a2e"
-      }
-    ]
+        color: "#1a1a2e",
+      },
+    ],
   },
   {
-    "elementType": "labels.text.fill",
-    "stylers": [
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#d1a3ff"
-      }
-    ]
+        color: "#d1a3ff",
+      },
+    ],
   },
   {
-    "elementType": "labels.text.stroke",
-    "stylers": [
+    elementType: "labels.text.stroke",
+    stylers: [
       {
-        "color": "#242440"
-      }
-    ]
+        color: "#242440",
+      },
+    ],
   },
   {
-    "featureType": "administrative",
-    "elementType": "geometry.stroke",
-    "stylers": [
+    featureType: "administrative",
+    elementType: "geometry.stroke",
+    stylers: [
       {
-        "color": "#6b4f80"
-      }
-    ]
+        color: "#6b4f80",
+      },
+    ],
   },
   {
-    "featureType": "administrative.land_parcel",
-    "elementType": "geometry.stroke",
-    "stylers": [
+    featureType: "administrative.land_parcel",
+    elementType: "geometry.stroke",
+    stylers: [
       {
-        "color": "#4a336a"
-      }
-    ]
+        color: "#4a336a",
+      },
+    ],
   },
   {
-    "featureType": "administrative.land_parcel",
-    "elementType": "labels.text.fill",
-    "stylers": [
+    featureType: "administrative.land_parcel",
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#b380b3"
-      }
-    ]
+        color: "#b380b3",
+      },
+    ],
   },
   {
-    "featureType": "landscape.natural",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "landscape.natural",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#1e1e3d"
-      }
-    ]
+        color: "#1e1e3d",
+      },
+    ],
   },
   {
-    "featureType": "poi",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "poi",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#3d285a"
-      }
-    ]
+        color: "#3d285a",
+      },
+    ],
   },
   {
-    "featureType": "poi",
-    "elementType": "labels.text.fill",
-    "stylers": [
+    featureType: "poi",
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#cc99cc"
-      }
-    ]
+        color: "#cc99cc",
+      },
+    ],
   },
   {
-    "featureType": "poi.park",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "poi.park",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#2e1e4a"
-      }
-    ]
+        color: "#2e1e4a",
+      },
+    ],
   },
   {
-    "featureType": "poi.park",
-    "elementType": "labels.text.fill",
-    "stylers": [
+    featureType: "poi.park",
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#b37ab3"
-      }
-    ]
+        color: "#b37ab3",
+      },
+    ],
   },
   {
-    "featureType": "road",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#4a307d"
-      }
-    ]
+        color: "#4a307d",
+      },
+    ],
   },
   {
-    "featureType": "road",
-    "elementType": "labels.text.fill",
-    "stylers": [
+    featureType: "road",
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#cc99cc"
-      }
-    ]
+        color: "#cc99cc",
+      },
+    ],
   },
   {
-    "featureType": "road.arterial",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "road.arterial",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#5c387d"
-      }
-    ]
+        color: "#5c387d",
+      },
+    ],
   },
   {
-    "featureType": "road.highway",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#6640a6"
-      }
-    ]
+        color: "#6640a6",
+      },
+    ],
   },
   {
-    "featureType": "road.highway",
-    "elementType": "geometry.stroke",
-    "stylers": [
+    featureType: "road.highway",
+    elementType: "geometry.stroke",
+    stylers: [
       {
-        "color": "#5233a6"
-      }
-    ]
+        color: "#5233a6",
+      },
+    ],
   },
   {
-    "featureType": "road.local",
-    "elementType": "labels.text.fill",
-    "stylers": [
+    featureType: "road.local",
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#cc99cc"
-      }
-    ]
+        color: "#cc99cc",
+      },
+    ],
   },
   {
-    "featureType": "transit.line",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "transit.line",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#5d3d80"
-      }
-    ]
+        color: "#5d3d80",
+      },
+    ],
   },
   {
-    "featureType": "transit.station",
-    "elementType": "geometry",
-    "stylers": [
+    featureType: "transit.station",
+    elementType: "geometry",
+    stylers: [
       {
-        "color": "#5d3d80"
-      }
-    ]
+        color: "#5d3d80",
+      },
+    ],
   },
   {
-    "featureType": "water",
-    "elementType": "geometry.fill",
-    "stylers": [
+    featureType: "water",
+    elementType: "geometry.fill",
+    stylers: [
       {
-        "color": "#2e1e6a"
-      }
-    ]
+        color: "#2e1e6a",
+      },
+    ],
   },
   {
-    "featureType": "water",
-    "elementType": "labels.text.fill",
-    "stylers": [
+    featureType: "water",
+    elementType: "labels.text.fill",
+    stylers: [
       {
-        "color": "#8c66b3"
-      }
-    ]
-  }
-];
+        color: "#8c66b3",
+      },
+    ],
+  },
+]

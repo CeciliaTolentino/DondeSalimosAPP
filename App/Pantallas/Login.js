@@ -1,358 +1,334 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
-import { AuthContext } from '../../AuthContext';
-import { 
-  View, 
-  StyleSheet, 
-  Image, 
-  TouchableOpacity, 
-  Text, 
-  SafeAreaView, 
+import { useState, useContext, useEffect, useCallback } from "react"
+import { AuthContext } from "../../AuthContext"
+import {
+  View,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  Text,
+  SafeAreaView,
   Alert,
   TextInput,
   ScrollView,
   Switch,
-} from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import auth from '@react-native-firebase/auth';
-import { GoogleSignin } from '../../firebase';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
-import { 
-  saveUserData, 
-  getUserData, 
-  savePendingApproval, 
-  setUserLoggedOut,
-  setUserLoggedIn
-} from './../../Componentes/utils/auth';
+  ActivityIndicator,
+} from "react-native"
+import { Picker } from "@react-native-picker/picker"
+import { useNavigation } from "@react-navigation/native"
 
 export default function Login() {
-  const navigation = useNavigation();
-  const [user, setUser] = useState(null);
-  const [initializing, setInitializing] = useState(true);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [name, setName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [isBarOwner, setIsBarOwner] = useState(false);
-  const [barName, setBarName] = useState('');
-  const [barType, setBarType] = useState('bar');
-  const [barCuit, setBarCuit] = useState('');
-  const [barAddress, setBarAddress] = useState('');
-  const [openingHours, setOpeningHours] = useState('');
-  const [closingHours, setClosingHours] = useState('');
-  const { updateAuth, clearAuth } = useContext(AuthContext);
+  const navigation = useNavigation()
+  const {
+    user,
+    isLoading,
+    isAuthenticated,
+    isRegistered,
+    loginWithGoogle,
+    autenticacionConGoogle,
+    logout,
+    registerComercio,
+  } = useContext(AuthContext)
+
+  const [showRegistrationForm, setShowRegistrationForm] = useState(false)
+  const [isBarOwner, setIsBarOwner] = useState(false)
+  const [comercioData, setComercioData] = useState({
+    ID_TipoComercio: 1,
+    Nombre: "",
+    Capacidad: "",
+    Mesas: "",
+    GeneroMusical: "",
+    TipoDocumento: "CUIT",
+    NroDocumento: "",
+    Direccion: "",
+    Telefono: "",
+  })
+
+  // Prellenar el correo cuando el usuario esté disponible
+  useEffect(() => {
+    if (user && user.email) {
+      setComercioData((prev) => ({
+        ...prev,
+        Correo: user.email,
+      }))
+    }
+  }, [user])
 
   useEffect(() => {
-    const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
-    return subscriber;
-  }, []);
-
-  useEffect(() => {
-    checkCurrentUser();
-  }, []);
-
-  const checkCurrentUser = useCallback(async () => {
-    try {
-      const userData = await getUserData();
-      if (userData && userData.isLoggedIn) {
-        setUser(userData);
-        updateAuth(userData);
-      } else {
-        setUser(null);
-        clearAuth();
-      }
-      setInitializing(false);
-    } catch (error) {
-      console.error('Error al verificar el usuario actual:', error);
-      setInitializing(false);
+    console.log("Estado de autenticación actualizado en Login:", { isAuthenticated, isRegistered, user })
+    if (isAuthenticated && !isRegistered) {
+      console.log("Usuario autenticado pero no registrado, mostrando formulario de registro")
+      setShowRegistrationForm(true)
+    } else if (isAuthenticated && isRegistered) {
+      console.log("Usuario autenticado y registrado, navegando a Profile")
+      navigation.navigate("Profile")
     }
-  }, [updateAuth, clearAuth]);
+  }, [isAuthenticated, isRegistered, user, navigation])
 
-  function onAuthStateChanged(firebaseUser) {
-    setInitializing(false);
-    if (firebaseUser) {
-      console.log('Estado de autenticación cambiado: Usuario autenticado');
-      checkUserRegistration(firebaseUser.uid, firebaseUser.email, false, firebaseUser);
-    } else {
-      setUser(null);
-      setIsRegistering(false);
+  const handleGoogleAuth = async () => {
+    try {
+      console.log("Iniciando autenticación con Google")
+      const result = await loginWithGoogle()
+      console.log("Resultado de autenticación:", result)
+
+      if (result.success && !result.isRegistered) {
+        console.log("Usuario autenticado pero no registrado, mostrando formulario de registro")
+        setShowRegistrationForm(true)
+      } else if (result.success && result.isRegistered) {
+        console.log("Usuario ya registrado, navegando a Profile")
+        navigation.navigate("Profile")
+      }
+    } catch (error) {
+      console.error("Error durante la autenticación con Google:", error)
+      Alert.alert("Error de autenticación", "No se pudo autenticar con Google. Por favor, intente de nuevo.")
     }
   }
 
-  const handleLogout = useCallback(async () => {
+  const handleRegistration = useCallback(async () => {
     try {
-      await GoogleSignin.signOut();
-      await auth().signOut();
-      await setUserLoggedOut();
-      clearAuth();
-      setUser(null);
-      setIsRegistering(false);
-      navigation.navigate('Home');
-      console.log('Sesión cerrada y estado de usuario actualizado');
-    } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-    }
-  }, [navigation, clearAuth]);
+      // Determinar el rol basado en la selección del usuario
+      const rolUsuario = isBarOwner ? 3 : 1
 
-  async function onGoogleButtonPress(isRegistration = false) {
-    try {
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      const userInfo = await GoogleSignin.signIn();
-      
-      console.log('Google Sign-In exitoso', JSON.stringify(userInfo, null, 2));
+      console.log("Enviando autenticación con Google con rol:", rolUsuario)
 
-      if (!userInfo.idToken) {
-        throw new Error('No se pudo obtener el idToken de Google Sign-In');
+      // Usar la nueva API autenticacionConGoogle
+      const result = await autenticacionConGoogle(rolUsuario)
+      console.log("Resultado completo de autenticacionConGoogle:", result)
+
+      if (result.success) {
+        if (isBarOwner) {
+          // Validar que tenemos todos los datos necesarios del comercio
+          if (!comercioData.Nombre || !comercioData.NroDocumento || !comercioData.Direccion || !comercioData.Telefono) {
+            Alert.alert("Error", "Por favor, complete todos los campos obligatorios del comercio.")
+            return
+          }
+
+          // Si es dueño de bar, registrar el comercio
+          const comercioDataToSend = {
+            iD_Comercio: 0,
+            nombre: comercioData.Nombre,
+            capacidad: Number.parseInt(comercioData.Capacidad) || 0,
+            mesas: Number.parseInt(comercioData.Mesas) || 0,
+            generoMusical: comercioData.GeneroMusical,
+            tipoDocumento: comercioData.TipoDocumento,
+            nroDocumento: comercioData.NroDocumento,
+            direccion: comercioData.Direccion,
+            correo: user.email, // Usar el email de Google
+            telefono: comercioData.Telefono,
+            estado: false,
+            fechaCreacion: new Date().toISOString(),
+            iD_Usuario: result.usuario.iD_Usuario, // CORREGIR: usar result.usuario
+            iD_TipoComercio: comercioData.ID_TipoComercio,
+          }
+
+          console.log("=== DATOS DEL COMERCIO A ENVIAR ===")
+          console.log("Nombre del comercio:", comercioDataToSend.nombre)
+          console.log("Tipo de comercio:", comercioDataToSend.iD_TipoComercio)
+          console.log("Capacidad:", comercioDataToSend.capacidad)
+          console.log("Mesas:", comercioDataToSend.mesas)
+          console.log("Género musical:", comercioDataToSend.generoMusical)
+          console.log("CUIT:", comercioDataToSend.nroDocumento)
+          console.log("Dirección:", comercioDataToSend.direccion)
+          console.log("Correo:", comercioDataToSend.correo)
+          console.log("Teléfono:", comercioDataToSend.telefono)
+          console.log("ID Usuario:", comercioDataToSend.iD_Usuario)
+          console.log("Estado:", comercioDataToSend.estado)
+          console.log("=== FIN DATOS COMERCIO ===")
+
+          try {
+            await registerComercio(comercioDataToSend)
+            console.log("✅ Comercio registrado exitosamente")
+
+            // CORREGIR: Mostrar el alert DESPUÉS del registro exitoso
+            Alert.alert(
+              "Registro pendiente de aprobación",
+              "Su solicitud ha sido enviada al administrador para su aprobación. Recibirá una notificación cuando sea aprobada.",
+              [
+                {
+                  text: "OK",
+                  onPress: async () => {
+                    console.log("Usuario confirmó mensaje de aprobación")
+                    await logout()
+                    setShowRegistrationForm(false)
+                  },
+                },
+              ],
+            )
+          } catch (comercioError) {
+            console.error("Error al registrar comercio:", comercioError)
+            Alert.alert("Error", "No se pudo registrar el comercio. Por favor, intente de nuevo.")
+          }
+        } else {
+          Alert.alert("Registro exitoso", "Sus datos han sido registrados correctamente.")
+          navigation.navigate("Profile")
+        }
       }
-
-      const googleCredential = auth.GoogleAuthProvider.credential(userInfo.idToken);
-      const userCredential = await auth().signInWithCredential(googleCredential);
-      console.log('Usuario autenticado en Firebase:', JSON.stringify(userCredential.user, null, 2));
-      
-      await checkUserRegistration(userCredential.user.uid, userCredential.user.email, isRegistration, userInfo.user);
     } catch (error) {
-      console.error('Error en la autenticación:', error);
-      Alert.alert('Error de autenticación', 'No se pudo iniciar sesión. Por favor, intente de nuevo.');
+      console.error("Error al registrar:", error)
+      Alert.alert("Error", "No se pudo completar el registro. Por favor, intente de nuevo.")
     }
+  }, [isBarOwner, comercioData, autenticacionConGoogle, registerComercio, logout, navigation, user])
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#0000ff" />
+      </View>
+    )
   }
-
-  const checkUserRegistration = useCallback(async (userId, email, isRegistration, googleUser) => {
-    try {
-      console.log('Verificando registro para el usuario ID:', userId);
-      let userData = await getUserData();
-      console.log('Datos del usuario desde AsyncStorage:', userData);
-  
-      if (email === 'cecilia.e.tolentino@gmail.com') {
-        const adminData = { 
-          email, 
-          userType: 'admin', 
-          googleId: userId,
-          photoURL: googleUser.photo,
-          name: googleUser.name,
-          approved: true,
-          isLoggedIn: true,
-          isRegistered: true
-        };
-        await saveUserData(adminData);
-        setUser(adminData);
-        updateAuth(adminData);
-        console.log('Datos del administrador guardados:', adminData);
-        return;
-      }
-  
-      if (!userData || userData.googleId !== userId) {
-        const newUserData = { 
-          uid: userId, 
-          email, 
-          photoURL: googleUser.photo, 
-          name: googleUser.givenName,
-          lastName: googleUser.familyName,
-          googleId: userId,
-          isLoggedIn: true,
-          userType: 'commonUser',
-          isRegistered: false
-        };
-        await saveUserData(newUserData);
-        setUser(newUserData);
-        updateAuth(newUserData);
-        setIsRegistering(true);
-      } else {
-        const updatedUserData = {
-          ...userData,
-          isLoggedIn: true,
-          photoURL: googleUser.photo || userData.photoURL,
-          name: googleUser.givenName || userData.name,
-          lastName: googleUser.familyName || userData.lastName,
-        };
-        await saveUserData(updatedUserData);
-        setUser(updatedUserData);
-        updateAuth(updatedUserData);
-        setIsRegistering(!updatedUserData.isRegistered);
-      }
-    } catch (error) {
-      console.error('Error en checkUserRegistration:', error);
-      Alert.alert('Error', 'Hubo un problema al verificar el registro. Por favor, intente de nuevo.');
-      await handleLogout();
-    }
-  }, [handleLogout, updateAuth]);
-
-  async function handleRegistration() {
-    if (!name || !lastName || (isBarOwner && (!barName || !barCuit || !barAddress || !openingHours || !closingHours))) {
-      Alert.alert('Error', 'Por favor, complete todos los campos obligatorios.');
-      return;
-    }
-
-    const userData = {
-      ...user,
-      name,
-      lastName,
-      userType: isBarOwner ? 'barOwner' : 'commonUser',
-      isBarOwner,
-      approved: !isBarOwner,
-      isLoggedIn: true,
-      isRegistered: true,
-      ...(isBarOwner && { 
-        barName, 
-        barType,
-        barCuit, 
-        barAddress, 
-        openingHours,
-        closingHours,
-      }),
-    };
-
-    try {
-      await saveUserData(userData);
-      if (isBarOwner) {
-        await savePendingApproval(userData);
-        Alert.alert('Registro pendiente de aprobación', 'Su solicitud ha sido enviada al administrador para su aprobación. Recibirá una notificación cuando sea aprobada.');
-        await handleLogout();
-      } else {
-        Alert.alert('Registro exitoso', 'Sus datos han sido registrados correctamente.');
-        setUser(userData);
-        updateAuth(userData);
-      }
-      setIsRegistering(false);
-    } catch (error) {
-      console.error('Error al guardar los datos del usuario:', error);
-      Alert.alert('Error', 'No se pudieron guardar los datos. Por favor, intente de nuevo.');
-    }
-  }
-
-  if (initializing) return null;
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
-        {!user && (
-          <Image source={require('../../img/login.png')} style={styles.logo}/>
-        )}
+        <Image source={require("../../img/login.png")} style={styles.logo} />
         <View style={styles.tarjeta}>
-          {!user ? (
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity style={styles.cajaBoton} onPress={() => onGoogleButtonPress(false)}>
-                <Text style={styles.Textoboton}>Iniciar sesión con Google</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cajaBoton} onPress={() => onGoogleButtonPress(true)}>
-                <Text style={styles.Textoboton}>Registrarse con Google</Text>
-              </TouchableOpacity>
-            </View>
-          ) : user.isRegistered ? (
-            <View style={styles.userInfo}>
-              {user.photoURL ? (
-                <Image source={{ uri: user.photoURL }} style={styles.userPhoto} />
-              ) : (
-                <View style={[styles.userPhoto, styles.placeholderPhoto]}>
-                  <Text style={styles.placeholderText}>{user.name ? user.name[0].toUpperCase() : '?'}</Text>
-                </View>
-              )}
-              <Text style={styles.welcomeText}>Hola, {user.name} {user.lastName}!</Text>
-              <Text style={styles.userTypeText}>Tipo de usuario: {user.userType}</Text>
-              <TouchableOpacity style={styles.cajaBoton} onPress={handleLogout}>
-                <Text style={styles.Textoboton}>Cerrar sesión</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.registrationForm}>
-              <Text style={styles.formTitle}>Complete su registro</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Nombre"
-                value={name}
-                onChangeText={setName}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Apellido"
-                value={lastName}
-                onChangeText={setLastName}
-              />
-              <View style={styles.switchContainer}>
-                <Text>¿Es dueño de un bar/boliche?</Text>
-                <Switch
-                  value={isBarOwner}
-                  onValueChange={setIsBarOwner}
-                />
+          {!isAuthenticated || (isAuthenticated && !isRegistered) ? (
+            !showRegistrationForm ? (
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity style={styles.cajaBoton} onPress={handleGoogleAuth}>
+                  <Text style={styles.Textoboton}>Iniciar sesión / Registrarse con Google</Text>
+                </TouchableOpacity>
               </View>
-              {isBarOwner && (
-                <>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Nombre del bar/boliche"
-                    value={barName}
-                    onChangeText={setBarName}
+            ) : (
+              <View style={styles.registrationForm}>
+                <Text style={styles.formTitle}>Complete su registro</Text>
+                <View style={styles.welcomeMessage}>
+                  <Text style={styles.welcomeTitle}>¡Bienvenido!</Text>
+                  <Text style={styles.welcomeText}>
+                    Estás a un paso de descubrir los mejores lugares para salir y disfrutar
+                  </Text>
+                </View>
+                <View style={styles.switchContainer}>
+                  <Text>¿Es dueño de un bar/boliche?</Text>
+                  <Switch
+                    value={isBarOwner}
+                    onValueChange={(value) => {
+                      setIsBarOwner(value)
+                    }}
                   />
-                  <Picker
-                    selectedValue={barType}
-                    style={styles.picker}
-                    onValueChange={(itemValue) => setBarType(itemValue)}
-                  >
-                    <Picker.Item label="Bar" value="bar" />
-                    <Picker.Item label="Boliche" value="boliche" />
-                  </Picker>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="CUIT del lugar (11 dígitos)"
-                    value={barCuit}
-                    onChangeText={(text) => setBarCuit(text.replace(/[^0-9]/g, '').slice(0, 11))}
-                    keyboardType="numeric"
-                    maxLength={11}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Dirección del lugar"
-                    value={barAddress}
-                    onChangeText={setBarAddress}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Horario de apertura (HH:MM)"
-                    value={openingHours}
-                    onChangeText={setOpeningHours}
-                    keyboardType="numbers-and-punctuation"
-                  />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Horario de cierre (HH:MM)"
-                    value={closingHours}
-                    onChangeText={setClosingHours}
-                    keyboardType="numbers-and-punctuation"
-                  />
-                </>
+                </View>
+                {isBarOwner && (
+                  <>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Nombre del comercio *"
+                      value={comercioData.Nombre}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Nombre: text }))}
+                    />
+                    <Picker
+                      selectedValue={comercioData.ID_TipoComercio}
+                      style={styles.picker}
+                      onValueChange={(itemValue) =>
+                        setComercioData((prevState) => ({ ...prevState, ID_TipoComercio: itemValue }))
+                      }
+                    >
+                      <Picker.Item label="Bar" value={1} />
+                      <Picker.Item label="Boliche" value={2} />
+                    </Picker>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Capacidad"
+                      value={comercioData.Capacidad}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Capacidad: text }))}
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Número de mesas"
+                      value={comercioData.Mesas}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Mesas: text }))}
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Género musical"
+                      value={comercioData.GeneroMusical}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, GeneroMusical: text }))}
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="CUIT *"
+                      value={comercioData.NroDocumento}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, NroDocumento: text }))}
+                      keyboardType="numeric"
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Dirección *"
+                      value={comercioData.Direccion}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Direccion: text }))}
+                    />
+                    {/* Campo de correo deshabilitado y prellenado */}
+                    <TextInput
+                      style={[styles.input, styles.disabledInput]}
+                      placeholder="Correo electrónico"
+                      value={user?.email || ""}
+                      editable={false}
+                      keyboardType="email-address"
+                    />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Teléfono *"
+                      value={comercioData.Telefono}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Telefono: text }))}
+                      keyboardType="phone-pad"
+                    />
+                  </>
+                )}
+                <TouchableOpacity style={styles.cajaBoton} onPress={handleRegistration}>
+                  <Text style={styles.Textoboton}>Completar registro</Text>
+                </TouchableOpacity>
+              </View>
+            )
+          ) : (
+            <View style={styles.userInfo}>
+              <Text style={styles.welcomeText}>Hola, {user?.nombreUsuario || user?.displayName || "Usuario"}!</Text>
+              <Text style={styles.userTypeText}>Email: {user?.correo || user?.email}</Text>
+              <Text style={styles.userTypeText}>
+                Tipo de usuario:{" "}
+                {user?.iD_RolUsuario === 3
+                  ? "Dueño de bar"
+                  : user?.iD_RolUsuario === 2
+                    ? "Administrador"
+                    : "Usuario común"}
+              </Text>
+              {user?.iD_RolUsuario === 3 && !user?.estado && (
+                <Text style={styles.pendingApprovalText}>
+                  Su cuenta está pendiente de aprobación por el administrador.
+                </Text>
               )}
-              <TouchableOpacity style={styles.cajaBoton} onPress={handleRegistration}>
-                <Text style={styles.Textoboton}>Completar registro</Text>
+              <TouchableOpacity style={styles.cajaBoton} onPress={logout}>
+                <Text style={styles.Textoboton}>Cerrar sesión</Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
       </ScrollView>
     </SafeAreaView>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: "#f5f5f5",
   },
   contentContainer: {
     flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     padding: 20,
   },
   logo: {
-    width: 200,
-    height: 200,
-    resizeMode: 'contain',
-    marginBottom: 30,
+    width: 150,
+    height: 150,
+    marginBottom: 20,
   },
   tarjeta: {
-    backgroundColor: 'white',
+    backgroundColor: "white",
     borderRadius: 10,
     padding: 20,
-    width: '100%',
-    alignItems: 'center',
+    width: "100%",
+    maxWidth: 400,
     shadowColor: "#000",
     shadowOffset: {
       width: 0,
@@ -363,75 +339,83 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   buttonContainer: {
-    width: '100%',
+    marginTop: 20,
   },
   cajaBoton: {
-    backgroundColor: '#5c288c',
+    backgroundColor: "#007bff",
     padding: 15,
     borderRadius: 5,
-    alignItems: 'center',
-    marginVertical: 10,
+    alignItems: "center",
+    marginBottom: 10,
   },
   Textoboton: {
-    color: 'white',
+    color: "white",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   registrationForm: {
-    width: '100%',
+    marginTop: 20,
   },
   formTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+    textAlign: "center",
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: "#ddd",
     padding: 10,
     borderRadius: 5,
     marginBottom: 10,
   },
+  disabledInput: {
+    backgroundColor: "#f5f5f5",
+    color: "#666",
+  },
   switchContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
   },
   picker: {
-    height: 50,
-    width: '100%',
-    marginBottom: 10,
+    marginBottom: 15,
   },
   userInfo: {
-    alignItems: 'center',
-    width: '100%',
-  },
-  userPhoto: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 10,
-  },
-  placeholderPhoto: {
-    backgroundColor: '#ccc',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize:  40,
-    color: '#fff',
+    alignItems: "center",
   },
   welcomeText: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 10,
-    textAlign: 'center',
   },
   userTypeText: {
     fontSize: 16,
-    marginBottom: 20,
-    textAlign: 'center',
+    marginBottom: 5,
   },
-});
+  pendingApprovalText: {
+    color: "orange",
+    fontStyle: "italic",
+    marginBottom: 10,
+  },
+  welcomeMessage: {
+    backgroundColor: "#f8f9fa",
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: "#007bff",
+  },
+  welcomeTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#007bff",
+    marginBottom: 5,
+  },
+  welcomeText: {
+    fontSize: 14,
+    color: "#6c757d",
+    lineHeight: 20,
+  },
+})

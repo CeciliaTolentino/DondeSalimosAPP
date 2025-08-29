@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Image, ActivityIndicator, Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TabNavigation from './App/Navigation/TabNavigation';
@@ -9,22 +9,14 @@ import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider } from './AuthContext';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
-
 const Stack = createNativeStackNavigator();
 
-// Pantalla de carga inicial
 const SplashScreen = ({ navigation }) => {
   useEffect(() => {
+    // Simulate a loading process
     const timer = setTimeout(() => {
       navigation.replace('TabNavigation');
-    }, 2000);
+    }, 2000); // Navigate after 2 seconds
 
     return () => clearTimeout(timer);
   }, [navigation]);
@@ -53,7 +45,7 @@ function App() {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
+        setErrorMsg('Se denegó el permiso para acceder a la ubicación');
         return;
       }
 
@@ -64,7 +56,11 @@ function App() {
   }, []);
 
   if (!fontsLoaded) {
-    return <ActivityIndicator size="large" color="#0000ff" />;
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#0000ff" />
+      </View>
+    );
   }
 
   return (
@@ -89,16 +85,23 @@ function App() {
   );
 }
 
-export default App;
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#fff', // Add a background color
   },
   logo: {
     width: 300,
-    height: 500,
+    height: 300, // Reduced height to fit better
+    marginBottom: 20, // Add some margin below the logo
+  },
+  statusText: {
+    marginTop: 20,
+    fontSize: 16,
+    color: '#333',
   },
 });
+
+export default App;
