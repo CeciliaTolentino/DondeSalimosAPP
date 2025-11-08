@@ -58,8 +58,8 @@ const [showRejectionModal, setShowRejectionModal] = useState(false)
         const allReservas = response.data
         const userReservas = allReservas.filter((r) => r.iD_Usuario == user.iD_Usuario)
 
-        const futureReservas = filterFutureReservas(userReservas)
-        setReservas(futureReservas)
+        //const futureReservas = filterFutureReservas(userReservas)
+        setReservas(userReservas)
       } else {
         setReservas([])
       }
@@ -357,50 +357,41 @@ const handleDeleteReserva = async (reserva) => {
         </View>
 
         {comerciosList.length > 1 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.comerciosSelector}
-            contentContainerStyle={styles.comerciosSelectorContent}
-          >
-            {comerciosList.map((comercio) => (
-              <TouchableOpacity
-                key={comercio.iD_Comercio}
-                style={[
-                  styles.comercioTab,
-                  selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabActive,
-                ]}
-                onPress={() => handleSelectComercio(comercio)}
-              >
-                <Text
+           <View style={styles.comerciosSelectorContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.comerciosSelectorContent}
+            >
+              {comerciosList.map((comercio, index) => (
+                <TouchableOpacity
+                  key={comercio.iD_Comercio}
                   style={[
-                    styles.comercioTabText,
-                    selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabTextActive,
+                    styles.comercioTab,
+                    selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabActive,
                   ]}
-                   numberOfLines={1}
+                  onPress={() => handleSelectComercio(comercio)}
                 >
-                  {comercio.nombre}
-                </Text>
-                <Text
-                  style={[
-                    styles.comercioTabType,
-                    selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabTypeActive,
-                  ]}
-                >
-                  {comercio.tipoComercio?.nombre || "Comercio"}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        
-
-       ) : (
+                  <Text
+                    style={[
+                      styles.comercioTabText,
+                      selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {comercio.nombre}
+                  </Text>
+                  {selectedComercio?.iD_Comercio === comercio.iD_Comercio && <View style={styles.activeIndicator} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : (
           <View style={styles.singleComercioHeader}>
             <Text style={styles.singleComercioName}>{selectedComercio?.nombre}</Text>
-            <Text style={styles.singleComercioType}>{selectedComercio?.tipoComercio?.nombre || "Comercio"}</Text>
+            <View style={styles.singleComercioUnderline} />
           </View>
         )}
-
 
         {reservas.length === 0 ? (
           <View style={styles.emptyContainer}>
@@ -409,7 +400,7 @@ const handleDeleteReserva = async (reserva) => {
             </View>
             <Text style={styles.emptyTitle}>Sin reservas pendientes</Text>
             <Text style={styles.emptySubtitle}>
-             Cuando tus clientes realicen reservas en {selectedComercio?.nombre}, aparecerán aquí para que puedas
+              Cuando tus clientes realicen reservas en {selectedComercio?.nombre}, aparecerán aquí para que puedas
               gestionarlas.
             </Text>
           </View>
@@ -422,6 +413,7 @@ const handleDeleteReserva = async (reserva) => {
             contentContainerStyle={styles.listContainer}
           />
         )}
+
         <Modal
           visible={showRejectionModal}
           transparent={true}
@@ -523,70 +515,71 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#b0b0b0",
   },
-  comerciosSelector: {
-    backgroundColor: "rgba(42, 42, 62, 0.5)",
+  comerciosSelectorContainer: {
+    backgroundColor: "rgba(26, 26, 46, 0.6)",
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(216, 56, 245, 0.3)",
+    borderBottomColor: "rgba(216, 56, 245, 0.15)",
+    paddingVertical: 4,
   },
   comerciosSelectorContent: {
-    padding: 15,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 8,
   },
   comercioTab: {
-   paddingHorizontal: 24,
+    paddingHorizontal: 24,
     paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: "rgba(42, 42, 62, 0.8)",
-    borderWidth: 2,
-    borderColor: "rgba(216, 56, 245, 0.2)",
-    marginRight: 10,
-    minWidth: 160,
-    alignItems: "center",
+    position: "relative",
   },
   comercioTabActive: {
-    backgroundColor: "rgba(216, 56, 245, 0.15)",
-    borderColor: "#D838F5",
+    backgroundColor: "transparent",
   },
   comercioTabText: {
-   fontSize: 18,
-    fontWeight: "700",
-    color: "#e0e0e0",
-    marginBottom: 6,
-    textAlign: "center",
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#6b6b7b",
+    letterSpacing: 0.5,
   },
   comercioTabTextActive: {
     color: "#D838F5",
+    fontWeight: "700",
   },
-  comercioTabType: {
-   fontSize: 13,
-    color: "#999",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    fontWeight: "600",
-  },
-  comercioTabTypeActive: {
-    color: "rgba(216, 56, 245, 0.8)",
+  activeIndicator: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: "#D838F5",
+    shadowColor: "#D838F5",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 3,
   },
   singleComercioHeader: {
-    backgroundColor: "rgba(216, 56, 245, 0.1)",
-    padding: 20,
+    backgroundColor: "rgba(26, 26, 46, 0.6)",
+    paddingVertical: 18,
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(216, 56, 245, 0.3)",
+    borderBottomColor: "rgba(216, 56, 245, 0.15)",
     alignItems: "center",
   },
   singleComercioName: {
-    fontSize: 22,
-    fontWeight: "bold",
+    fontSize: 18,
+    fontWeight: "700",
     color: "#D838F5",
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  singleComercioType: {
-    fontSize: 14,
-    color: "#b0b0b0",
-    textTransform: "uppercase",
     letterSpacing: 1,
-    fontWeight: "600",
+  },
+  singleComercioUnderline: {
+    marginTop: 8,
+    width: 60,
+    height: 2,
+    backgroundColor: "#D838F5",
+    shadowColor: "#D838F5",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
   },
   listContainer: {
     padding: 15,
@@ -696,7 +689,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 40,
   },
- emptyIconContainer: {
+  emptyIconContainer: {
     backgroundColor: "rgba(216, 56, 245, 0.1)",
     borderRadius: 50,
     width: 100,
@@ -723,6 +716,27 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
     maxWidth: 320,
+  },
+  rejectionReasonContainer: {
+    marginTop: 10,
+    padding: 12,
+    backgroundColor: "rgba(220, 38, 38, 0.15)",
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#dc2626",
+  },
+  rejectionReasonLabel: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#ef4444",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  rejectionReasonText: {
+    fontSize: 14,
+    color: "#fecaca",
+    lineHeight: 20,
   },
   modalOverlay: {
     flex: 1,
@@ -798,19 +812,6 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "600",
-  },
-  rejectionReasonLabel: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#ef4444",
-    marginBottom: 4,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  rejectionReasonText: {
-    fontSize: 14,
-    color: "#fecaca",
-    lineHeight: 20,
   },
   deleteButton: {
     flexDirection: "row",

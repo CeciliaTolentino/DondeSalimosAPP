@@ -727,9 +727,9 @@ const pendingResenias = resenias.filter((r) => r.estado === false && !r.motivoRe
 
   return (
     <SafeAreaView style={styles.container}>
-      
+    <View style={styles.tabsContainer}>
 
-      <View style={styles.tabContainer}>
+      
          <TouchableOpacity
           style={[styles.tab, activeTab === "dashboard" && styles.activeTab]}
           onPress={() => setActiveTab("dashboard")}
@@ -741,7 +741,7 @@ const pendingResenias = resenias.filter((r) => r.estado === false && !r.motivoRe
           onPress={() => setActiveTab("resenias")}
         >
           <Text style={[styles.tabText, activeTab === "resenias" && styles.activeTabText]}>
-            Reseñas ({pendingResenias.length})
+            Reseñas
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -749,7 +749,7 @@ const pendingResenias = resenias.filter((r) => r.estado === false && !r.motivoRe
           onPress={() => setActiveTab("comercios")}
         >
           <Text style={[styles.tabText, activeTab === "comercios" && styles.activeTabText]}>
-            Comercios ({pendingComercios.length})
+            Comercios 
           </Text>
         </TouchableOpacity>
          <TouchableOpacity
@@ -757,7 +757,7 @@ const pendingResenias = resenias.filter((r) => r.estado === false && !r.motivoRe
           onPress={() => setActiveTab("publicidades")}
         >
           <Text style={[styles.tabText, activeTab === "publicidades" && styles.activeTabText]}>
-            Publicidades ({pendingPublicidades.length})
+            Publicidades 
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -765,7 +765,7 @@ const pendingResenias = resenias.filter((r) => r.estado === false && !r.motivoRe
           onPress={() => setActiveTab("usuarios")}
         >
           <Text style={[styles.tabText, activeTab === "usuarios" && styles.activeTabText]}>
-            Usuarios ({usuarios.length})
+            Usuarios
           </Text>
         </TouchableOpacity>
       </View>
@@ -1683,28 +1683,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
   },
-  tabContainer: {
+  tabsContainer: {
     flexDirection: "row",
+    flexWrap: "wrap",
     marginBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(216, 56, 245, 0.3)",
   },
+  tabContentContainer: {
+    paddingHorizontal: 5,
+    paddingBottom: 5,
+  },
   tab: {
-    flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     alignItems: "center",
-    borderBottomWidth: 2,
+    justifyContent: "center",
+    borderBottomWidth: 3,
     borderBottomColor: "transparent",
+    marginBottom: -6,
   },
   activeTab: {
     borderBottomColor: "#D838F5",
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 15,
     color: "#b0b0b0",
     fontWeight: "500",
+    
   },
-  activeTabText: {
+   activeTabText: {
     color: "#D838F5",
     fontWeight: "bold",
   },

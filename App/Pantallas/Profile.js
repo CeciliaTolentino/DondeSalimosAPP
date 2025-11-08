@@ -107,6 +107,27 @@ const ComercioStatus = ({ userId }) => {
     }
   }
 }
+
+// funcion auxiliar para cuando una publicidad es expirada
+const isPublicidadExpirada = (fechaExpiracion) => {
+  if (!fechaExpiracion) return false // If no expiration date, it's not expired
+  const now = new Date()
+  const expiryDate = new Date(fechaExpiracion)
+  return now > expiryDate
+}
+
+
+// funcion auxiliar para la reserva
+const getReservaEstado = (reserva) => {
+  if (reserva.estado === true) {
+    return { text: "Aprobada", style: styles.estadoActivo }
+  } else if (reserva.motivoRechazo) {
+    return { text: "Rechazada", style: styles.estadoRechazado }
+  } else {
+    return { text: "Pendiente", style: styles.estadoInactivo }
+  }
+}
+
 export default function Profile() {
   const { user, isBarOwner, isAdmin, isApproved, updateAuth, buscarUsuarioPorId,  eliminarUsuario, logout } =
     useContext(AuthContext)
@@ -261,6 +282,7 @@ const [showReseñasRecibidasModal, setShowReseñasRecibidasModal] = useState(fal
         loadComercioStats()
         loadReseñasRecibidas()
         loadPublicidades()
+        loadReservasRecibidas()
       } else {
         console.log(" Cargando estadísticas de usuario normal...")
         loadUserStats()
@@ -409,7 +431,10 @@ let totalPublicidades = 0
           const publicidadesResponse = await Apis.obtenerPublicidadesPorNombreComercio(comercio.nombre)
           const comercioPublicidades = publicidadesResponse.data || []
 
-          const formattedPublicidades = comercioPublicidades.map((p) => ({
+          const formattedPublicidades = comercioPublicidades.map((p) => {
+            console.log(` Publicidad ${p.iD_Publicidad}: estado=${p.estado}, fechaExpiracion=${p.fechaExpiracion}`)
+
+            return {
             id: p.iD_Publicidad,
             comercio: comercio.nombre,
             descripcion: p.descripcion || "Sin descripción",
@@ -417,7 +442,9 @@ let totalPublicidades = 0
             estado: p.estado,
             fechaCreacion: new Date(p.fechaCreacion),
             fechaExpiracion: p.fechaExpiracion ? new Date(p.fechaExpiracion) : null,
-          }))
+            }
+          })
+          
 
           allPublicidades = [...allPublicidades, ...formattedPublicidades]
         } catch (error) {
@@ -426,7 +453,7 @@ let totalPublicidades = 0
       }
 
       setPublicidades(allPublicidades)
-      console.log(" ✅ Publicidades cargadas:", allPublicidades.length)
+      console.log(" Publicidades cargadas:", allPublicidades.length)
     } catch (error) {
       console.error(" Error al cargar publicidades:", error)
       setPublicidades([])
@@ -564,15 +591,21 @@ let totalPublicidades = 0
 
       const userReservas = reservasResponse.data.filter((reserva) => comercioIds.includes(reserva.iD_Comercio))
 
-      const formattedReservas = userReservas.map((r) => ({
-        id: r.iD_Reserva,
-        comercio: userComerciosData.find((c) => c.iD_Comercio === r.iD_Comercio)?.nombre || "Comercio desconocido",
-        usuario: r.usuario?.nombreUsuario || "Usuario desconocido",
-        fecha: new Date(r.fechaReserva),
-        cantidadPersonas: r.cantidadPersonas,
-        estado: r.estado,
-        aprobada: r.aprobada,
-      }))
+      const formattedReservas = userReservas.map((r) => {
+        console.log(
+          `Reserva ${r.iD_Reserva}: estado=${r.estado}, motivoRechazo=${r.motivoRechazo}, comenzales=${r.comenzales}`,
+        )
+
+        return {
+          id: r.iD_Reserva,
+          comercio: userComerciosData.find((c) => c.iD_Comercio === r.iD_Comercio)?.nombre || "Comercio desconocido",
+          usuario: r.usuario?.nombreUsuario || "Usuario desconocido",
+          fecha: new Date(r.fechaReserva),
+          cantidadPersonas: r.comenzales || 0, // Usando comenzales del backend
+          estado: r.estado, // true = aprobada, false = pendiente o rechazada
+          motivoRechazo: r.motivoRechazo, // Para distinguir rechazada de pendiente
+        }
+      })
 
       setReservasRecibidas(formattedReservas)
       console.log("✅ Reservas recibidas cargadas:", formattedReservas.length)
@@ -1160,33 +1193,52 @@ const handleDeleteProfile = async () => {
                     ) : activeTab === "publicidades" ? (
                       publicidades.length > 0 ? (
                         <>
-                          {publicidades.slice(0, 2).map((pub) => (
-                            <View key={pub.id} style={styles.publicidadCard}>
-                              <View style={styles.publicidadHeader}>
-                                <View style={styles.publicidadInfo}>
-                                  <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
-                                  <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
-                                  <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
+                         {publicidades.slice(0, 2).map((pub) => {
+                            const isExpirada = isPublicidadExpirada(pub.fechaExpiracion)
+
+                            return (
+                              <View key={pub.id} style={styles.publicidadCard}>
+                                <View style={styles.publicidadHeader}>
+                                  <View style={styles.publicidadInfo}>
+                                    <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
+                                    <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
+                                    <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
+                                  </View>
+                                  <View style={styles.visualizacionesBadge}>
+                                    <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
+                                    <Text style={styles.visualizacionesLabel}>vistas</Text>
+                                  </View>
                                 </View>
-                                <View style={styles.visualizacionesBadge}>
-                                  <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
-                                  <Text style={styles.visualizacionesLabel}>vistas</Text>
+									 
+                                <View style={styles.publicidadFooter}>
+                                  {isExpirada ? (
+                                    <View style={[styles.estadoBadge, styles.estadoExpirado]}>
+                                      <Text style={styles.estadoText}>⌛ Expirada</Text>
+                                    </View>
+                                  ) : (
+                                    <View
+                                      style={[
+                                        styles.estadoBadge,
+                                        pub.estado ? styles.estadoActivo : styles.estadoInactivo,
+                                      ]}
+                                    >
+                                      <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
+                                    </View>
+                                  )}
+                                  {pub.fechaExpiracion && (
+                                    <Text style={styles.expiracionText}>
+                                      {isExpirada ? "Expiró:" : "Expira:"} {getRelativeTime(pub.fechaExpiracion)}
+                                    </Text>
+                                  )}
                                 </View>
+														 
+																	  
+																				  
+										 
+								  
                               </View>
-                              <View style={styles.publicidadFooter}>
-                                <View
-                                  style={[styles.estadoBadge, pub.estado ? styles.estadoActivo : styles.estadoInactivo]}
-                                >
-                                  <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
-                                </View>
-                                {pub.fechaExpiracion && (
-                                  <Text style={styles.expiracionText}>
-                                    Expira: {getRelativeTime(pub.fechaExpiracion)}
-                                  </Text>
-                                )}
-                              </View>
-                            </View>
-                          ))}
+                            )
+                          })}
                           {publicidades.length > 2 && (
                             <TouchableOpacity
                               style={styles.verMasButton}
@@ -1202,31 +1254,36 @@ const handleDeleteProfile = async () => {
                     ) : activeTab === "reservas" ? (
                       reservasRecibidas.length > 0 ? (
                         <>
-                          {reservasRecibidas.slice(0, 2).map((reserva) => (
-                            <View key={reserva.id} style={styles.reservaCard}>
-                              <View style={styles.reservaHeader}>
-                                <View style={styles.reservaInfo}>
-                                  <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
-                                  <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
-                                  <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
+                          {reservasRecibidas.slice(0, 2).map((reserva) => {
+                            const estadoInfo = getReservaEstado(reserva)
+
+                            return (
+                              <View key={reserva.id} style={styles.reservaCard}>
+                                <View style={styles.reservaHeader}>
+                                  <View style={styles.reservaInfo}>
+                                    <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
+                                    <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
+                                    <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
+                                  </View>
+                                  <View style={styles.reservaPersonasBadge}>
+                                    <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
+                                    <Text style={styles.reservaPersonasLabel}>personas</Text>
+                                  </View>
                                 </View>
-                                <View style={styles.reservaPersonasBadge}>
-                                  <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
-                                  <Text style={styles.reservaPersonasLabel}>personas</Text>
+									 
+                                <View style={styles.reservaFooter}>
+									 
+										  
+                                  <View style={[styles.estadoBadge, estadoInfo.style]}>
+																								   
+									
+								 
+                                    <Text style={styles.estadoText}>{estadoInfo.text}</Text>
+                                  </View>
                                 </View>
                               </View>
-                              <View style={styles.reservaFooter}>
-                                <View
-                                  style={[
-                                    styles.estadoBadge,
-                                    reserva.aprobada ? styles.estadoActivo : styles.estadoInactivo,
-                                  ]}
-                                >
-                                  <Text style={styles.estadoText}>{reserva.aprobada ? "Aprobada" : "Pendiente"}</Text>
-                                </View>
-                              </View>
-                            </View>
-                          ))}
+                            )
+                          })}
                           {reservasRecibidas.length > 2 && (
                             <TouchableOpacity
                               style={styles.verMasButton}
@@ -1464,29 +1521,43 @@ const handleDeleteProfile = async () => {
                 </TouchableOpacity>
               </View>
               <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {publicidades.map((pub) => (
-                  <View key={pub.id} style={styles.publicidadCard}>
-                    <View style={styles.publicidadHeader}>
-                      <View style={styles.publicidadInfo}>
-                        <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
-                        <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
-                        <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
+                {publicidades.map((pub) => {
+                  const isExpirada = isPublicidadExpirada(pub.fechaExpiracion)
+
+                  return (
+                    <View key={pub.id} style={styles.publicidadCard}>
+                      <View style={styles.publicidadHeader}>
+                        <View style={styles.publicidadInfo}>
+                          <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
+                          <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
+                          <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
+                        </View>
+                        <View style={styles.visualizacionesBadge}>
+                          <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
+                          <Text style={styles.visualizacionesLabel}>vistas</Text>
+                        </View>
                       </View>
-                      <View style={styles.visualizacionesBadge}>
-                        <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
-                        <Text style={styles.visualizacionesLabel}>vistas</Text>
+						   
+                      <View style={styles.publicidadFooter}>
+                        {isExpirada ? (
+                          <View style={[styles.estadoBadge, styles.estadoExpirado]}>
+                            <Text style={styles.estadoText}>⌛ Expirada</Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.estadoBadge, pub.estado ? styles.estadoActivo : styles.estadoInactivo]}>
+                            <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
+                          </View>
+                        )}
+                        {pub.fechaExpiracion && (
+                          <Text style={styles.expiracionText}>
+                            {isExpirada ? "Expiró:" : "Expira:"} {getRelativeTime(pub.fechaExpiracion)}
+                          </Text>
+                        )}
                       </View>
                     </View>
-                    <View style={styles.publicidadFooter}>
-                      <View style={[styles.estadoBadge, pub.estado ? styles.estadoActivo : styles.estadoInactivo]}>
-                        <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
-                      </View>
-                      {pub.fechaExpiracion && (
-                        <Text style={styles.expiracionText}>Expira: {getRelativeTime(pub.fechaExpiracion)}</Text>
-                      )}
-                    </View>
-                  </View>
-                ))}
+						 
+                  )
+                })}
               </ScrollView>
             </View>
           </View>
@@ -1572,28 +1643,33 @@ const handleDeleteProfile = async () => {
                 </TouchableOpacity>
               </View>
               <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {reservasRecibidas.map((reserva) => (
-                  <View key={reserva.id} style={styles.reservaCard}>
-                    <View style={styles.reservaHeader}>
-                      <View style={styles.reservaInfo}>
-                        <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
-                        <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
-                        <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
+                {reservasRecibidas.map((reserva) => {
+                  const estadoInfo = getReservaEstado(reserva)
+
+                  return (
+                    <View key={reserva.id} style={styles.reservaCard}>
+                      <View style={styles.reservaHeader}>
+                        <View style={styles.reservaInfo}>
+                          <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
+                          <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
+                          <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
+                        </View>
+                        <View style={styles.reservaPersonasBadge}>
+                          <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
+                          <Text style={styles.reservaPersonasLabel}>personas</Text>
+                        </View>
                       </View>
-                      <View style={styles.reservaPersonasBadge}>
-                        <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
-                        <Text style={styles.reservaPersonasLabel}>personas</Text>
+						   
+                      <View style={styles.reservaFooter}>
+						   
+                        <View style={[styles.estadoBadge, estadoInfo.style]}>
+					   
+                          <Text style={styles.estadoText}>{estadoInfo.text}</Text>
+                        </View>
                       </View>
                     </View>
-                    <View style={styles.reservaFooter}>
-                      <View
-                        style={[styles.estadoBadge, reserva.aprobada ? styles.estadoActivo : styles.estadoInactivo]}
-                      >
-                        <Text style={styles.estadoText}>{reserva.aprobada ? "Aprobada" : "Pendiente"}</Text>
-                      </View>
-                    </View>
-                  </View>
-                ))}
+                  )
+                })}
               </ScrollView>
             </View>
           </View>
@@ -1831,6 +1907,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "rgba(255, 255, 255, 0.5)",
   },
+  estadoExpirado: {
+    backgroundColor: "rgba(156, 163, 175, 0.2)",
+    borderColor: "#9ca3af",
+  },
   placeCard: {
     backgroundColor: "rgba(58, 9, 103, 0.3)",
     borderRadius: 12,
@@ -1974,7 +2054,7 @@ const styles = StyleSheet.create({
   editButton: {
     backgroundColor: "rgba(58, 9, 103, 0.6)",
     borderWidth: 1,
-    borderColor: "rgba(216, 56, 245, 0.5)",
+    borderColor: "rgba(216, 56, 245, 0.4)",
   },
   saveButton: {
     backgroundColor: "rgba(74, 222, 128, 0.8)",
@@ -2352,12 +2432,12 @@ const styles = StyleSheet.create({
     maxHeight: "100%",
   },
   reservaCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
+     backgroundColor: "rgba(58, 9, 103, 0.3)",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderColor: "rgba(216, 56, 245, 0.3)",
   },
   reservaHeader: {
     flexDirection: "row",
@@ -2468,5 +2548,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     lineHeight: 20,
+  },
+  estadoRechazado: {
+    backgroundColor: "rgba(239, 68, 68, 0.2)",
+    borderColor: "#ef4444",
   },
 })

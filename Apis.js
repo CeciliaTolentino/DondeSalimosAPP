@@ -474,6 +474,30 @@ const eliminarPublicidad = async (id) => {
     throw error
   }
 }
+export const actualizarPublicidadRechazadaPagada = async (publicidadId, publicidadData) => {
+  try {
+    const headers = await getAuthHeaders()
+    console.log("Actualizando publicidad rechazada pagada (mantiene pago, limpia motivo rechazo)")
+
+    const body = {
+      ...publicidadData,
+      ID_Publicidad: publicidadId,
+      Estado: false, 
+      MotivoRechazo: null, 
+      Pago: true, 
+    }
+
+    console.log("Body a enviar:", JSON.stringify(body, null, 2))
+
+    const response = await apiClient.put(`/api/Publicidades/actualizar/${publicidadId}`, body, { headers })
+    console.log("Publicidad rechazada pagada actualizada exitosamente")
+    return response
+  } catch (error) {
+    console.error("Error al actualizar publicidad rechazada pagada:", error.response?.data || error.message)
+    throw error
+  }
+}
+// ==================== PREFERENCIAS DE PAGOS ====================
 const crearPreferenciaPago = async (publicidadData) => {
   try {
      const headers = await getAuthHeaders()

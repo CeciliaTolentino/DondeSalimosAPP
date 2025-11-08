@@ -129,20 +129,18 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
       setIsLoading(false)
     }
 
-    const handlePaymentReturn = async (event) => {
-      const url = event.url
-      console.log("Deep link received:", url)
+    const handleDeepLink = async (event) => {
+      try {
+        const url = event.url
+        console.log("Deep link recibido:", url)
 
-      if (url.includes("payment/success")) {
-        const urlParams = new URL(url).searchParams
-        const paymentId = urlParams.get("payment_id")
-        const preferenceId = urlParams.get("preference_id")
+        if (url.includes("payment_id") && url.includes("preference_id")) {
+          const paymentId = url.match(/payment_id=([^&]+)/)?.[1]
+          const preferenceId = url.match(/preference_id=([^&]+)/)?.[1]
 
-        console.log("Payment success - ID:", paymentId, "Preference:", preferenceId)
+          if (paymentId && preferenceId) {
+            console.log("Verificando pago:", { paymentId, preferenceId })
 
-        if (paymentId && preferenceId) {
-          try {
-            console.log("Verificando pago con backend...")
             const verifyResponse = await Apis.verificarYActivarPago(paymentId, preferenceId)
 
             if (verifyResponse.status === 200 && verifyResponse.data.success) {
@@ -159,64 +157,68 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
                 descripcion: publicidadData.descripcion,
                 visualizaciones: publicidadData.visualizaciones,
                 tiempo: publicidadData.tiempo,
-                estado: false, 
+                estado: publicidadData.estado, // Keep original estado (true if already approved, false if not)
                 fechaCreacion: publicidadData.fechaCreacion,
                 iD_Comercio: publicidadData.iD_Comercio,
                 iD_TipoComercio: publicidadData.iD_TipoComercio,
                 foto: publicidadData.imagen,
-                pago: true,  
+                pago: true,
               })
 
-              console.log("Publicidad activada exitosamente")
+              console.log("Publicidad actualizada con pago exitoso")
 
               setPublicidadModalVisible(false)
               setSelectedPublicidad(null)
 
+              if (publicidadData.estado) {
+                Alert.alert("¡Pago exitoso!", "Tu pago ha sido procesado. La publicidad ya está activa.", [
+                  { text: "OK", onPress: () => loadTodasPublicidades() },
+                ])
+              } else {
+                Alert.alert(
+                  "¡Pago exitoso!",
+                  "Tu pago ha sido procesado. La publicidad está pendiente de aprobación del administrador.",
+                  [{ text: "OK", onPress: () => loadTodasPublicidades() }],
+                )
+              }
+            } else {
+              console.error("Error en la respuesta de verificación de pago:", verifyResponse.data)
               Alert.alert(
-               "¡Pago exitoso!",
-  "Tu pago ha sido procesado. La publicidad está pendiente de aprobación del administrador.",
-                [
-                  {
-                    text: "Ver mis publicidades",
-                    onPress: () => {
-                      setActiveTab("publicidades")
-                      if (selectedComercio) {
-                        loadPublicidades(selectedComercio.iD_Comercio)
-                      }
-                    },
-                  },
-                ],
+                "Error al procesar el pago",
+                verifyResponse.data?.message || "Hubo un problema al verificar tu pago. Por favor, contacta a soporte.",
+                [{ text: "Entendido" }],
               )
             }
-          } catch (error) {
-            console.error("Error al verificar/activar pago:", error)
-            Alert.alert("Error", "Hubo un problema al activar tu publicidad. Por favor contacta a soporte.", [
-              { text: "Entendido" },
-            ])
           }
+        } else if (url.includes("payment/failure")) {
+          setPublicidadModalVisible(false)
+          setSelectedPublicidad(null)
+
+          Alert.alert("Pago Rechazado", "El pago no pudo ser procesado. Tu publicidad quedará pendiente de pago.", [
+            {
+              text: "Entendido",
+              onPress: () => {
+                if (selectedComercio) {
+                  loadPublicidades(selectedComercio.iD_Comercio)
+                }
+              },
+            },
+          ])
+        } else if (url.includes("payment/pending")) {
+          Alert.alert("Pago Pendiente", "Tu pago está siendo procesado. Te notificaremos cuando se confirme.", [
+            { text: "Entendido" },
+          ])
         }
-      } else if (url.includes("payment/failure")) {
+      } catch (error) {
+        console.error("Error al manejar deep link:", error)
+        Alert.alert("Error", "Hubo un problema al procesar la notificación de pago.", [{ text: "Entendido" }])
         setPublicidadModalVisible(false)
         setSelectedPublicidad(null)
-
-        Alert.alert("Pago Rechazado", "El pago no pudo ser procesado. Tu publicidad quedará pendiente de pago.", [
-          {
-            text: "Entendido",
-            onPress: () => {
-              if (selectedComercio) {
-                loadPublicidades(selectedComercio.iD_Comercio)
-              }
-            },
-          },
-        ])
-      } else if (url.includes("payment/pending")) {
-        Alert.alert("Pago Pendiente", "Tu pago está siendo procesado. Te notificaremos cuando se confirme.", [
-          { text: "Entendido" },
-        ])
       }
     }
 
-    const subscription = Linking.addEventListener("url", handlePaymentReturn)
+    const subscription = Linking.addEventListener("url", handleDeepLink)
+   
 
     return () => {
       subscription.remove()
@@ -621,9 +623,33 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
   
   const renderPublicidadesPanel = () => {
-    // Agrupar publicidades por comercio
+    // Agrupar publicidades por comercio Y estado
     const publicidadesPorComercio = {}
+    const publicidadesPendientes = []
+    const publicidadesActivas = []
+    const publicidadesRechazadas = []
+    const publicidadesExpiradas = []
+
     todasPublicidades.forEach((pub) => {
+      const isExpired = pub.fechaExpiracionCalculada < new Date()
+
+      // Clasificar por estado
+      if (pub.isRechazada) {
+        publicidadesRechazadas.push(pub)
+      } else if (!pub.estado && pub.pago) {
+        publicidadesPendientes.push(pub) // Pagada pero pendiente de aprobación
+      } else if (!pub.estado && !pub.pago) {
+        publicidadesPendientes.push(pub) // Pendiente de pago y aprobación
+      } else if (pub.estado && !pub.pago) {
+        publicidadesPendientes.push(pub) // Aprobada pero pendiente de pago
+
+      } else if (pub.estado && pub.pago && !isExpired) {
+        publicidadesActivas.push(pub) // Activa y pagada
+      } else if (isExpired) {
+        publicidadesExpiradas.push(pub)
+      }
+
+      // También mantener agrupación por comercio para la vista original
       if (!publicidadesPorComercio[pub.iD_Comercio]) {
         publicidadesPorComercio[pub.iD_Comercio] = {
           nombreComercio: pub.nombreComercio,
@@ -644,6 +670,124 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
       return { uri: `data:image/jpeg;base64,${imageData}` }
     }
 
+    const renderPublicidadCard = (pub) => {
+      const fechaExpiracionStr = formatDateDDMMYY(pub.fechaExpiracionCalculada)
+      const isExpired = pub.fechaExpiracionCalculada < new Date()
+
+      return (
+        <View
+          key={pub.iD_Publicidad}
+          style={[styles.publicidadCardLarge, pub.isRechazada && styles.publicidadRechazada]}
+        >
+          {pub.isRechazada && (
+            <View style={styles.publicidadRejectionBanner}>
+              <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
+          
+                <Text style={styles.publicidadRejectionMessage}>{pub.motivoRechazo}</Text>
+              
+            </View>
+          )}
+
+          <View style={styles.publicidadCardContent}>
+            <Image
+              source={getPublicidadImageSource(pub)}
+              style={styles.publicidadImageLarge}
+              defaultSource={require("../../assets/placeholder.jpg")}
+              resizeMode="cover"
+            />
+
+            <View style={styles.publicidadDetailsLarge}>
+              <Text style={styles.publicidadTiempoLarge}>{getTiempoLabel(pub.tiempo)}</Text>
+
+              <Text style={styles.publicidadComercioName}>{pub.nombreComercio}</Text>
+           
+              <Text style={styles.publicidadDescription}>
+                {pub.descripcion?.substring(0, 100) || "Sin descripción"}
+                {pub.descripcion?.length > 100 && "..."}
+              </Text>
+
+              <Text style={styles.publicidadViewsLarge}>
+                <MaterialCommunityIcons name="eye" size={16} color="#D838F5" /> {pub.visualizaciones || 0}{" "}
+                visualizaciones
+              </Text>
+
+              <Text style={styles.publicidadFechaExpiracion}>Vence: {fechaExpiracionStr}</Text>
+
+              {/* Badges de estado */}
+               {pub.pago && (
+                <View style={[styles.publicidadStatusBadge, styles.publicidadPagaBadge]}>
+                  <Text style={styles.publicidadPagaText}>💰 Paga</Text>
+                </View>
+              )}
+
+              {pub.isRechazada && (
+                <View style={[styles.publicidadStatusBadge, styles.publicidadRechazadaBadge]}>
+                  <Text style={styles.publicidadRechazadaText}>Rechazada</Text>
+                </View>
+              )}
+
+              {!pub.estado && pub.pago && !pub.isRechazada && (
+                <View style={[styles.publicidadStatusBadge, styles.publicidadPendienteAprobacionBadge]}>
+                  <Text style={styles.publicidadPendienteAprobacionText}>⏳ Pendiente de aprobación</Text>
+                </View>
+              )}
+
+              {!pub.estado && !pub.pago && !pub.isRechazada && (
+                <View style={styles.publicidadStatusBadge}>
+                  <Text style={styles.publicidadPendienteText}>💳 Pendiente de pago</Text>
+                </View>
+              )}
+
+              {pub.estado && pub.pago && !isExpired && (
+                <View style={[styles.publicidadStatusBadge, styles.publicidadActivaBadge]}>
+                  <Text style={styles.publicidadActivaText}> Activa</Text>
+                </View>
+              )}
+
+              {isExpired && (
+                <>
+                <View style={[styles.publicidadStatusBadge, styles.publicidadExpiradaBadge]}>
+                  <Text style={styles.publicidadExpiradaText}>⌛ Expirada</Text>
+                </View>
+                  <View style={{ height: 12 }} />
+                </>
+              )}
+             {pub.estado && !pub.pago && !pub.isRechazada && (
+                <TouchableOpacity style={styles.publicidadPayButton} onPress={() => handlePayPublicidad(pub)}>
+                  <MaterialCommunityIcons name="credit-card" size={18} color="#fff" />
+                  <Text style={styles.publicidadPayButtonText}>Pagar Ahora</Text>
+                </TouchableOpacity>
+              )}
+              {pub.isRechazada && pub.pago && (
+                <TouchableOpacity style={styles.publicidadEditButton} onPress={() => handleEditPublicidad(pub)}>
+                  <MaterialCommunityIcons name="pencil" size={18} color="#fff" />
+                  <Text style={styles.publicidadEditButtonText}>Editar Imagen</Text>
+                </TouchableOpacity>
+              )}
+{pub.isRechazada && !pub.pago && (
+                <TouchableOpacity
+                  style={styles.publicidadEditPayButton}
+                  onPress={() => handleEditRejectedUnpaid(pub)}
+                >
+                  <MaterialCommunityIcons name="pencil" size={18} color="#fff" />
+                  <Text style={styles.publicidadEditPayButtonText}>Editar y Pagar</Text>
+                </TouchableOpacity>
+              )}
+              {isExpired && (
+                <TouchableOpacity
+                  style={styles.publicidadDeleteButtonSmall}
+                  onPress={() => handleDeletePublicidad(pub.iD_Publicidad)}
+                >
+                   <MaterialCommunityIcons name="delete" size={18} color="#fff" />
+                  <Text style={styles.deletePublicidadButtonText}>Eliminar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      )
+    }
+
     return (
       <ScrollView style={styles.publicidadesPanel}>
         <Text style={styles.panelTitle}>Mis Publicidades</Text>
@@ -654,136 +798,152 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             <Text style={styles.emptyStateText}>No tienes publicidades</Text>
           </View>
         ) : (
-          Object.entries(publicidadesPorComercio).map(([comercioId, data]) => (
-            <View key={comercioId} style={styles.comercioPublicidadesGroup}>
-              <Text style={styles.comercioGroupTitle}>{data.nombreComercio}</Text>
+          <>
+            {/* Sección de Publicidades Pendientes */}
+            {publicidadesPendientes.length > 0 && (
 
-              {data.publicidades.map((pub) => {
-                const fechaExpiracionStr = formatDateDDMMYY(pub.fechaExpiracionCalculada)
-                const isExpired = pub.fechaExpiracionCalculada < new Date()
+											   
+																						 
+																		   
 
-                return (
-                  <View
-                    key={pub.iD_Publicidad}
-                    style={[styles.publicidadCardLarge, pub.isRechazada && styles.publicidadRechazada]}
-                  >
-                    {pub.isRechazada && (
-                      <View style={styles.publicidadRejectionBanner}>
-                        <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
-                        <View style={styles.publicidadRejectionTextContainer}>
-                          <Text style={styles.publicidadRejectionTitle}>Publicidad Rechazada</Text>
-                          <Text style={styles.publicidadRejectionMessage}>{pub.motivoRechazo}</Text>
-                        </View>
-                      </View>
-                    )}
+						
+					   
+										   
+																									   
+				   
+										 
+              <View style={styles.publicidadesSection}>
+																								
+                <View style={styles.sectionHeaderContainer}>
+																								   
+																									
+							   
+							 
+					  
 
-                    <View style={styles.publicidadCardContent}>
-                      <Image
-                        source={getPublicidadImageSource(pub)}
-                        style={styles.publicidadImageLarge}
-                        defaultSource={require("../../assets/placeholder.jpg")}
-                        resizeMode="cover"
-                      />
+															   
+							
+															  
+														   
+																			   
+										  
+						
 
-                      <View style={styles.publicidadInfoLarge}>
-                        <Text style={styles.publicidadTiempoLarge}>{getTiempoLabel(pub.tiempo)}</Text>
-                        <Text style={styles.publicidadViewsLarge}>
-                          <MaterialCommunityIcons name="eye" size={16} color="#D838F5" /> {pub.visualizaciones}{" "}
-                          visualizaciones
-                        </Text>
-                        <Text style={styles.publicidadExpiracionLarge}>
-                          {isExpired ? "Expirada" : `Vence: ${fechaExpiracionStr}`}
-                        </Text>
+															   
+																									  
+																  
+                  <MaterialCommunityIcons name="clock-outline" size={24} color="#ffc107" />
+										 
+							   
+                  <Text style={styles.sectionHeaderTitle}>
+                     Pendientes de Aprobación ({publicidadesPendientes.length})
+							   
 
-                           {/* Badges de estado */}
-                        {pub.isRechazada && (
-                          <View style={[styles.publicidadStatusBadge, styles.publicidadRechazadaBadge]}>
-                            <Text style={styles.publicidadRechazadaText}> Rechazada</Text>
-                          </View>
-                        )}
-                       {!pub.estado && pub.pago && !pub.isRechazada && (
-                          <View style={[styles.publicidadStatusBadge, styles.publicidadPendienteAprobacionBadge]}>
-                            <Text style={styles.publicidadPendienteAprobacionText}>⏳ Pendiente de aprobación</Text>
-                          </View>
-                        )}
+												   
+											 
+																										
+                  </Text>
+                </View>
+						  
+																		
+																												  
+                <Text style={styles.sectionDescription}>
+                  Estas publicidades están esperando ser revisadas por el administrador.
+						  
 
-                         {!pub.estado && !pub.pago && !pub.isRechazada && (
-                          <View style={styles.publicidadStatusBadge}>
-                            <Text style={styles.publicidadPendienteText}>💳 Pendiente de pago</Text>
-                          </View>
-                        )}
-                        
-                        {pub.estado && pub.pago && !isExpired && (
-                          <View style={[styles.publicidadStatusBadge, styles.publicidadActivaBadge]}>
-                            <Text style={styles.publicidadActivaText}>✓ Activa</Text>
-                          </View>
-                        )}
-                        {isExpired && (
-                          <View style={[styles.publicidadStatusBadge, styles.publicidadExpiradaBadge]}>
-                            <Text style={styles.publicidadExpiradaText}>⌛ Expirada</Text>
-                      </View>
-                      )}
-                      
-                        {/* Motivo de rechazo si existe */}
-                        {pub.isRechazada && pub.motivoRechazo && (
-                          <View style={styles.publicidadMotivoRechazoContainer}>
-                            <Text style={styles.publicidadMotivoRechazoLabel}>Motivo:</Text>
-                            <Text style={styles.publicidadMotivoRechazoText}>{pub.motivoRechazo}</Text>
-                          </View>
-                        )}
+																		   
+																	 
+                </Text>
+                {publicidadesPendientes.map(renderPublicidadCard)}
+						  
+						
+																  
+																									 
+																					   
+								 
+						  
+									   
+																									   
+																						   
+              </View>
+            )}
+					  
+														   
+																  
+																				
+																					 
+																					
+								 
+						  
 
-                       
+					   
 
-                        {/* Botón de editar para publicidades rechazadas */}
-                        {pub.isRechazada && (
-                          <TouchableOpacity
-                            style={styles.publicidadEditButtonLarge}
-                            onPress={() => handleEditPublicidad(pub)}
-                          >
-                            <MaterialCommunityIcons name="pencil" size={20} color="white" />
-                            <Text style={styles.publicidadEditButtonTextLarge}>Editar</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
+            {/* Sección de Publicidades Activas */}
+            {publicidadesActivas.length > 0 && (
+										   
+              <View style={styles.publicidadesSection}>
+                <View style={styles.sectionHeaderContainer}>
+						   
+                  <MaterialCommunityIcons name="check-circle" size={24} color="#4caf50" />
+                  <Text style={[styles.sectionHeaderTitle, { color: "#4caf50" }]}>
+                     Activas ({publicidadesActivas.length})
+                  </Text>
+                </View>
+                <Text style={styles.sectionDescription}>
+                  Estas publicidades están aprobadas y visibles en la aplicación.
+                </Text>
+                {publicidadesActivas.map(renderPublicidadCard)}
+              </View>
+            )}
 
-                    <View style={styles.publicidadActionsLarge}>
-                      {!pub.estado && !pub.isRechazada && (
-                        <TouchableOpacity
-                          style={styles.publicidadPayButtonLarge}
-                          onPress={() => handlePayPendingPublicidad(pub)}
-                        >
-                          <MaterialCommunityIcons name="credit-card" size={20} color="white" />
-                          <Text style={styles.publicidadPayButtonTextLarge}>Pagar</Text>
-                        </TouchableOpacity>
-                      )}
-{/* Rechazada */}
-                     
+            {/* Sección de Publicidades Rechazadas */}
+            {publicidadesRechazadas.length > 0 && (
+										 
+              <View style={styles.publicidadesSection}>
+                <View style={styles.sectionHeaderContainer}>
+						 
+                  <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
+                  <Text style={[styles.sectionHeaderTitle, { color: "#ff6b6b" }]}>
+                    Rechazadas ({publicidadesRechazadas.length})
+                  </Text>
+                </View>
+                <Text style={styles.sectionDescription}>
+                  Estas publicidades fueron rechazadas. Lee el motivo y edítalas para volver a enviarlas.
+                </Text>
+                {publicidadesRechazadas.map(renderPublicidadCard)}
+              </View>
+            )}
+				 
+					 
 
-                      <TouchableOpacity
-                        style={styles.publicidadDeleteButtonLarge}
-                        onPress={() => handleDeletePublicidad(pub)}
-                      >
-                        <MaterialCommunityIcons name="delete" size={20} color="white" />
-                        <Text style={styles.publicidadDeleteButtonTextLarge}>Eliminar</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )
-              })}
-            </View>
-          ))
+            {/* Sección de Publicidades Expiradas */}
+            {publicidadesExpiradas.length > 0 && (
+              <View style={styles.publicidadesSection}>
+                <View style={styles.sectionHeaderContainer}>
+                  
+                  <Text style={[styles.sectionHeaderTitle, { color: "#9e9e9e" }]}>
+                    ⌛ Expiradas ({publicidadesExpiradas.length})
+                  </Text>
+                </View>
+                <Text style={styles.sectionDescription}>
+                  Estas publicidades ya cumplieron su período de vigencia. Puedes eliminarlas.
+                </Text>
+                {publicidadesExpiradas.map(renderPublicidadCard)}
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
     )
   }
- const validateEmail = (email) => {
+
+  const validateEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     return emailRegex.test(email)
   }
   const handleSubmitNewComercio = async () => {
     try {
-      
+	  
       if (
         !newComercioData.Nombre ||
         !newComercioData.NroDocumento ||
@@ -794,7 +954,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         Alert.alert("Error", "Por favor, complete todos los campos obligatorios.")
         return
       }
-  if (!validateEmail(newComercioData.Correo)) {
+      if (!validateEmail(newComercioData.Correo)) {
         Alert.alert(
           "Error de validación",
           "El correo electrónico no tiene un formato válido. Debe ser del formato: ejemplo@dominio.com",
@@ -808,8 +968,8 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         return
       }
 
-     if (newComercioHoraIngreso && !validateTimeFormat(newComercioHoraIngreso)) {
-        Alert.alert("Error", "El horario de apertura debe tener el formato HH:MM (ej: 18:00)")
+      if (newComercioHoraIngreso && !validateTimeFormat(newComercioHoraIngreso)) {
+        Alert.Alert("Error", "El horario de apertura debe tener el formato HH:MM (ej: 18:00)")
         return
       }
 
@@ -820,8 +980,8 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
       setIsSaving(true)
 
-      
-const horaIngresoFormatted =
+      const horaIngresoFormatted =
+							
         newComercioHoraIngreso && newComercioHoraIngreso.trim() !== ""
           ? formatTimeWithSeconds(newComercioHoraIngreso)
           : null
@@ -830,7 +990,7 @@ const horaIngresoFormatted =
           ? formatTimeWithSeconds(newComercioHoraCierre)
           : null
 
-      
+	  
       const comercioDataToSend = {
         iD_Comercio: 0,
         nombre: newComercioData.Nombre,
@@ -865,8 +1025,8 @@ const horaIngresoFormatted =
           [
             {
               text: "OK",
-        onPress: () => {
-          setCreateModalVisible(false)
+              onPress: () => {
+                setCreateModalVisible(false)
                 loadComerciosList()
               },
             },
@@ -876,7 +1036,7 @@ const horaIngresoFormatted =
         throw new Error("Error al crear comercio")
       }
     } catch (error) {
-      
+	  
       let errorMessage = "No se pudo crear el comercio."
 
       if (error.response?.data) {
@@ -990,20 +1150,20 @@ const horaIngresoFormatted =
 
   
   const handleEditPublicidad = (publicidad) => {
-    // Si la publicidad ya fue pagada y está rechazada, permitir editar sin pagar
+    // Si la publicidad ya fue pagada y está rechazada, permitir editar sin cambiar duración
     if (publicidad.pago && !publicidad.estado && publicidad.motivoRechazo) {
       Alert.alert(
         "Editar Publicidad Rechazada",
-        "Esta publicidad ya fue pagada. Puedes editar la imagen sin volver a pagar.",
+        "Esta publicidad ya fue pagada. Puedes actualizar la imagen para que sea revisada nuevamente por el administrador.",
         [
           {
             text: "Cancelar",
             style: "cancel",
           },
           {
-            text: "Editar",
+            text: "Editar Imagen",
             onPress: () => {
-              setSelectedPublicidad(publicidad)
+              setSelectedPublicidad({ ...publicidad, isRejectedPaid: true })
               setPublicidadModalVisible(true)
             },
           },
@@ -1015,6 +1175,32 @@ const horaIngresoFormatted =
     }
   }
 
+
+  const handleEditRejectedUnpaid = (pub) => {
+     console.log("handleEditRejectedUnpaid llamada con:", {
+      publicidadId: pub.iD_Publicidad,
+      comercioId: pub.iD_Comercio,
+      pago: pub.pago,
+      estado: pub.estado,
+      motivoRechazo: pub.motivoRechazo,
+    })
+
+    // Find the comercio object from the list
+    const comercio = comerciosList.find((c) => c.iD_Comercio === pub.iD_Comercio)
+
+    console.log("Found comercio:", comercio ? { id: comercio.iD_Comercio, nombre: comercio.nombre } : null)
+
+    if (comercio) {
+      setSelectedComercio(comercio)
+    }
+
+    console.log("Setting selectedPublicidad with isRejectedUnpaid: true")
+    setSelectedPublicidad({
+      ...pub,
+      isRejectedUnpaid: true,
+    })
+    setPublicidadModalVisible(true)
+  }
 
   // Function to handle publicidad delete
   const handleDeletePublicidad = (publicidad) => {
@@ -1028,11 +1214,11 @@ const horaIngresoFormatted =
             await Apis.eliminarPublicidad(publicidad.iD_Publicidad)
             Alert.alert("Éxito", "La publicidad ha sido eliminada correctamente.")
             if (selectedComercio) {
-            await loadPublicidades(selectedComercio.iD_Comercio)
-             }
+              await loadPublicidades(selectedComercio.iD_Comercio)
+            }
 
             // Siempre recargar todas las publicidades si estamos en el tab de publicidades
-         
+
             if (activeTab === "publicidades") {
               await loadTodasPublicidades()
             }
@@ -1045,7 +1231,9 @@ const horaIngresoFormatted =
     ])
   }
 
-  const handlePayPendingPublicidad = async (publicidad) => {
+ 
+
+  const handlePayPublicidad = async (publicidad) => {
     try {
       const durations = [
         { days: 7, label: "1 Semana", price: 3000 },
@@ -1059,7 +1247,7 @@ const horaIngresoFormatted =
       if (tiempo.includes("15")) duration = durations[1]
       else if (tiempo.includes("30")) duration = durations[2]
 
-      console.log("Generando link de pago para publicidad pendiente:", publicidad.iD_Publicidad)
+      console.log("Generando link de pago para publicidad:", publicidad.iD_Publicidad)
 
       const preferenciaResponse = await Apis.crearPreferenciaPago({
         titulo: `Publicidad ${duration.label} - ${publicidad.nombreComercio || "Comercio"}`,
@@ -1092,12 +1280,17 @@ const horaIngresoFormatted =
     // Remove milliseconds and normalize format
     const normalizedTiempo = tiempo.split(".")[0] // Remove .000 if present
 
-    // Map tiempo values to labels
-    if (normalizedTiempo.startsWith("7") || normalizedTiempo.startsWith("07")) {
+    // Extract the first number (days) from the tiempo string
+    const parts = normalizedTiempo.split(":")
+    const dias = parts.length > 0 ? Number.parseInt(parts[0]) : 0
+
+    // Map tiempo values to labels based on days
+    if (dias === 7) {
       return "1 Semana"
-    } else if (normalizedTiempo.startsWith("15")) {
+    } else if (dias === 15) {
       return "15 Días"
-    } else if (normalizedTiempo.startsWith("30")) {
+    } else if (dias >= 23 && dias <= 31) {
+      // Handle 1 month (23, 28, 29, 30, or 31 days)
       return "1 Mes"
     }
 
@@ -1132,7 +1325,9 @@ const horaIngresoFormatted =
       }
       return require("../../assets/placeholder.jpg")
     }
-const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
+    const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
+
+
     return (
       <ScrollView style={styles.modalScrollView}>
         <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}>
@@ -1145,7 +1340,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
             <Text numberOfLines={2} style={styles.modalTitle}>
               {selectedComercio.nombre}
             </Text>
-{isRechazado && (
+            {isRechazado && (
               <View style={styles.rejectionBanner}>
                 <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
                 <View style={styles.rejectionTextContainer}>
@@ -1171,21 +1366,21 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
               </Text>
               {selectedComercio.generoMusical && <Text style={styles.hashtag}>#{selectedComercio.generoMusical}</Text>}
             </View>
- {!isRechazado && (
-            <View style={styles.advertisingSection}>
-          
-              <TouchableOpacity
-                style={styles.createPublicidadButton}
-                onPress={() => {
-                setPublicidadModalVisible(true)
+            {!isRechazado && (
+              <View style={styles.advertisingSection}>
+		  
+                <TouchableOpacity
+                  style={styles.createPublicidadButton}
+                  onPress={() => {
+                    setPublicidadModalVisible(true)
                     setSelectedPublicidad(null)
-                }}
-              >
-                <MaterialCommunityIcons name="plus" size={20} color="white" />
+                  }}
+                >
+                  <MaterialCommunityIcons name="plus" size={20} color="white" />
                   <Text style={styles.createPublicidadButtonText}>Crear Publicidad</Text>
-              </TouchableOpacity>
-            </View>
- )}
+                </TouchableOpacity>
+              </View>
+            )}
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.editButton} onPress={() => setIsEditing(true)}>
                 <MaterialCommunityIcons name="pencil" size={20} color="white" />
@@ -1246,32 +1441,32 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
               />
 
               <Text style={styles.editLabel}>Horario de apertura</Text>
-          <TextInput
-            style={styles.editInput}
-            value={newComercioHoraIngreso}
-            onChangeText={(text) => {
-              console.log("DEBUG - Horario de apertura cambiado a:", text)
-              setNewComercioHoraIngreso(text)
-            }}
-            placeholder="ej: 18:00"
-            maxLength={5}
-            placeholderTextColor="#a0a0a0"
-          />
-          <Text style={styles.helperText}>Formato: HH:MM (ej: 18:00 para 6 PM)</Text>
+              <TextInput
+                style={styles.editInput}
+                value={openingHours} // Use openingHours state for editing
+                onChangeText={(text) => {
+                  console.log("DEBUG - Horario de apertura cambiado a:", text)
+                  setOpeningHours(text)
+                }}
+                placeholder="ej: 18:00"
+                maxLength={5}
+                placeholderTextColor="#a0a0a0"
+              />
+              <Text style={styles.helperText}>Formato: HH:MM (ej: 18:00 para 6 PM)</Text>
 
-          <Text style={styles.editLabel}>Horario de cierre</Text>
-          <TextInput
-            style={styles.editInput}
-            value={newComercioHoraCierre}
-            onChangeText={(text) => {
-              console.log("DEBUG - Horario de cierre cambiado a:", text)
-              setNewComercioHoraCierre(text)
-            }}
-            placeholder="ej: 02:00"
-            maxLength={5}
-            placeholderTextColor="#a0a0a0"
-          />
-          <Text style={styles.helperText}>Formato: HH:MM (ej: 02:00 para 2 AM)</Text>
+              <Text style={styles.editLabel}>Horario de cierre</Text>
+              <TextInput
+                style={styles.editInput}
+                value={closingHours} // Use closingHours state for editing
+                onChangeText={(text) => {
+                  console.log("DEBUG - Horario de cierre cambiado a:", text)
+                  setClosingHours(text)
+                }}
+                placeholder="ej: 02:00"
+                maxLength={5}
+                placeholderTextColor="#a0a0a0"
+              />
+              <Text style={styles.helperText}>Formato: HH:MM (ej: 02:00 para 2 AM)</Text>
               <Text style={styles.editLabel}>Imagen del negocio</Text>
               <TouchableOpacity
                 style={styles.imageButton}
@@ -1302,7 +1497,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
     )
   }
 
- const renderCreateComercioForm = () => {
+  const renderCreateComercioForm = () => {
     return (
       <ScrollView style={styles.modalScrollView}>
         <TouchableOpacity style={styles.closeButton} onPress={() => setCreateModalVisible(false)}>
@@ -1370,7 +1565,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
 
           <Text style={styles.editLabel}>Teléfono del comercio *</Text>
           <View style={styles.phoneContainer}>
-          
+		  
             <TextInput
               style={styles.phoneInput}
               value={newComercioData.Telefono}
@@ -1414,7 +1609,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
             placeholder="Género musical"
             placeholderTextColor="#a0a0a0"
           />
-             <Text style={styles.editLabel}>Horario de apertura</Text>
+          <Text style={styles.editLabel}>Horario de apertura</Text>
           <TextInput
             style={styles.editInput}
             value={newComercioHoraIngreso}
@@ -1514,7 +1709,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
         </TouchableOpacity>
       </View>
 
-        <View style={styles.tabsContainer}>
+      <View style={styles.tabsContainer}>
         <TouchableOpacity
           style={[styles.tab, activeTab === "comercios" && styles.activeTab]}
           onPress={() => setActiveTab("comercios")}
@@ -1523,7 +1718,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
           <Text style={[styles.tabText, activeTab === "comercios" && styles.activeTabText]}>Comercios</Text>
         </TouchableOpacity>
 
-        
+		
 
         <TouchableOpacity
           style={[styles.tab, activeTab === "publicidades" && styles.activeTab]}
@@ -1540,66 +1735,66 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
 
       {activeTab === "comercios" && (
         <>
-{rejectedComercios.length > 0 && (
-        <View style={styles.rejectedSection}>
-          <Text style={styles.sectionTitle}>❌ Comercios Rechazados ({rejectedComercios.length})</Text>
-          <FlatList
-            data={rejectedComercios}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={styles.rejectedCard} onPress={() => handleComercioPress(item)}>
-                <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
-                <View style={styles.rejectedCardContent}>
-                  <Text style={styles.rejectedCardName}>{item.nombre}</Text>
-                  <Text style={styles.rejectedCardStatus}>Toca para ver el motivo y editar</Text>
-                </View>
-              </TouchableOpacity>
-            )}
-            keyExtractor={(item) => item.iD_Comercio.toString()}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-          />
-        </View>
-      )}
-      {pendingComercios.length > 0 && (
-        <View style={styles.pendingSection}>
-          <Text style={styles.sectionTitle}>⏳ Pendientes de Aprobación ({pendingComercios.length})</Text>
-          <FlatList
-            data={pendingComercios}
-            renderItem={({ item }) => (
-              <View style={styles.pendingCard}>
-                <Text style={styles.pendingCardName}>{item.nombre}</Text>
-                <Text style={styles.pendingCardStatus}>En revisión</Text>
-              </View>
-            )}
-            keyExtractor={(item) => item.iD_Comercio.toString()}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-          />
-        </View>
+          {rejectedComercios.length > 0 && (
+            <View style={styles.rejectedSection}>
+              <Text style={styles.sectionTitle}>❌ Comercios Rechazados ({rejectedComercios.length})</Text>
+              <FlatList
+                data={rejectedComercios}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.rejectedCard} onPress={() => handleComercioPress(item)}>
+                    <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
+                    <View style={styles.rejectedCardContent}>
+                      <Text style={styles.rejectedCardName}>{item.nombre}</Text>
+                      <Text style={styles.rejectedCardStatus}>Toca para ver el motivo y editar</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                keyExtractor={(item) => item.iD_Comercio.toString()}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+              />
+            </View>
+          )}
+          {pendingComercios.length > 0 && (
+            <View style={styles.pendingSection}>
+              <Text style={styles.sectionTitle}>⏳ Pendientes de Aprobación ({pendingComercios.length})</Text>
+              <FlatList
+                data={pendingComercios}
+                renderItem={({ item }) => (
+                  <View style={styles.pendingCard}>
+                    <Text style={styles.pendingCardName}>{item.nombre}</Text>
+                    <Text style={styles.pendingCardStatus}>En revisión</Text>
+                  </View>
+                )}
+                keyExtractor={(item) => item.iD_Comercio.toString()}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+              />
+            </View>
+          )}
+
+          {approvedComercios.length > 0 ? (
+            <View style={styles.approvedSection}>
+              <Text style={styles.sectionTitle}>Comercios Aprobados</Text>
+              <FlatList
+                data={approvedComercios}
+                renderItem={({ item }) => <ComercioCard comercio={item} onPress={handleComercioPress} />}
+                keyExtractor={(item) => item.iD_Comercio.toString()}
+                numColumns={2}
+                columnWrapperStyle={styles.row}
+              />
+            </View>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>🏪</Text>
+              <Text style={styles.emptyTitle}>No tienes comercios aprobados</Text>
+              <Text style={styles.emptySubtitle}>Crea tu primer comercio para comenzar</Text>
+            </View>
+          )}
+        </>
       )}
 
-      {approvedComercios.length > 0 ? (
-        <View style={styles.approvedSection}>
-           <Text style={styles.sectionTitle}>Comercios Aprobados</Text>
-          <FlatList
-            data={approvedComercios}
-            renderItem={({ item }) => <ComercioCard comercio={item} onPress={handleComercioPress} />}
-            keyExtractor={(item) => item.iD_Comercio.toString()}
-            numColumns={2}
-            columnWrapperStyle={styles.row}
-          />
-        </View>
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>🏪</Text>
-          <Text style={styles.emptyTitle}>No tienes comercios aprobados</Text>
-          <Text style={styles.emptySubtitle}>Crea tu primer comercio para comenzar</Text>
-        </View>
-      )}
- </>
-      )}
-
-      
+	  
 
       {activeTab === "publicidades" && renderPublicidadesPanel()}
       {/* Modal de detalles del comercio */}
@@ -1613,7 +1808,7 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
           <View style={styles.modalView}>{renderComercioDetails()}</View>
         </View>
       </Modal>
-<Modal
+      <Modal
         animationType="slide"
         transparent={true}
         visible={createModalVisible}
@@ -1632,20 +1827,23 @@ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRec
           if (selectedComercio) {
             loadPublicidades(selectedComercio.iD_Comercio) // Reload after closing
           }
-         
+
           if (activeTab === "publicidades") {
             loadTodasPublicidades()
           }
         }}
         comercio={selectedComercio}
         publicidadToEdit={selectedPublicidad}
+        isEditingRejectedPaid={selectedPublicidad?.isRejectedPaid || false}
+        isRejectedUnpaid={selectedPublicidad?.isRejectedUnpaid || false}
       />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
- container: {
+
+  container: {
     flex: 1,
     backgroundColor: "#1a1a2e",
   },
@@ -2024,7 +2222,7 @@ const styles = StyleSheet.create({
     color: "#D838F5",
     marginBottom: 10,
   },
- publicidadCard: {
+  publicidadCard: {
     flexDirection: "column",
     backgroundColor: "rgba(58, 9, 103, 0.4)",
     borderRadius: 8,
@@ -2038,7 +2236,7 @@ const styles = StyleSheet.create({
     height: 180,
     borderRadius: 8,
     marginBottom: 10,
-     backgroundColor: "rgba(0, 0, 0, 0.2)",
+    backgroundColor: "rgba(0, 0, 0, 0.2)",
   },
   publicidadInfo: {
     marginBottom: 8,
@@ -2075,6 +2273,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(216, 56, 245, 0.4)",
     minWidth: 44,
     alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
   },
   publicidadDeleteButton: {
     backgroundColor: "rgba(220, 53, 69, 0.8)",
@@ -2084,6 +2284,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(220, 53, 69, 0.4)",
     minWidth: 44,
     alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
   },
   publicidadPendiente: {
     fontSize: 12,
@@ -2096,23 +2298,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(216, 56, 245, 0.8)",
+    backgroundColor: "#4caf50",
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "rgba(216, 56, 245, 0.4)",
-    shadowColor: "#D838F5",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    marginTop: 12,
   },
- payPublicidadButtonText: {
-    color: "white",
+  publicidadPayButtonText: {
+    color: "#fff",
     fontSize: 14,
-    fontWeight: "bold",
+    fontWeight: "600",
     marginLeft: 6,
   },
   picker: {
@@ -2164,9 +2359,9 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   publicidadesScrollView: {
-  maxHeight: 400,
-},
-rejectionBanner: {
+    maxHeight: 400,
+  },
+  rejectionBanner: {
     flexDirection: "row",
     backgroundColor: "rgba(255, 107, 107, 0.15)",
     padding: 15,
@@ -2245,7 +2440,7 @@ rejectionBanner: {
     fontSize: 14,
     fontWeight: "600",
   },
-   tabsContainer: {
+  tabsContainer: {
     flexDirection: "row",
     backgroundColor: "rgba(58, 9, 103, 0.3)",
     borderRadius: 12,
@@ -2309,27 +2504,26 @@ rejectionBanner: {
     borderWidth: 2,
   },
   publicidadRejectionBanner: {
-    flexDirection: "row",
     backgroundColor: "rgba(255, 107, 107, 0.15)",
     padding: 12,
     borderRadius: 8,
     marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: "#ff6b6b",
-    gap: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   publicidadRejectionTextContainer: {
     flex: 1,
   },
   publicidadRejectionTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
     color: "#ff6b6b",
+    fontSize: 14,
+    fontWeight: "600",
     marginBottom: 4,
   },
   publicidadRejectionMessage: {
+    color: "#ff6b6b",
     fontSize: 13,
-    color: "#ffcccc",
     lineHeight: 18,
   },
   publicidadCardContent: {
@@ -2342,22 +2536,42 @@ rejectionBanner: {
     borderRadius: 8,
     backgroundColor: "rgba(0, 0, 0, 0.3)",
   },
-  publicidadInfoLarge: {
+  publicidadDetailsLarge: {
     flex: 1,
     justifyContent: "space-between",
   },
   publicidadTiempoLarge: {
+    fontSize: 14,
+    color: "#D838F5",
+    fontWeight: "700",
+  },
+  publicidadComercioName: {
+    fontSize: 13,
+    color: "#D838F5",
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  publicidadTitle: {
     fontSize: 16,
     fontWeight: "bold",
     color: "#D838F5",
   },
-  publicidadViewsLarge: {
-    fontSize: 14,
+  publicidadDescription: {
+    fontSize: 13,
     color: "#ccc",
+    marginTop: 5,
   },
-  publicidadExpiracionLarge: {
+  publicidadViewsLarge: {
+    fontSize: 13,
+    color: "#D838F5",
+    marginTop: 8,
+    display: "flex",
+    alignItems: "center",
+  },
+  publicidadFechaExpiracion: {
     fontSize: 13,
     color: "#999",
+    marginTop: 8,
   },
   publicidadStatusBadge: {
     backgroundColor: "rgba(255, 193, 7, 0.2)",
@@ -2365,6 +2579,7 @@ rejectionBanner: {
     paddingVertical: 6,
     borderRadius: 6,
     alignSelf: "flex-start",
+    marginTop: 8,
   },
   publicidadActivaBadge: {
     backgroundColor: "rgba(76, 175, 80, 0.2)",
@@ -2378,6 +2593,49 @@ rejectionBanner: {
     fontSize: 12,
     color: "#4caf50",
     fontWeight: "600",
+  },
+  publicidadRechazadaBadge: {
+    backgroundColor: "rgba(255, 107, 107, 0.2)",
+  },
+  publicidadRechazadaText: {
+    fontSize: 12,
+    color: "#ff6b6b",
+    fontWeight: "600",
+  },
+  publicidadPendienteAprobacionBadge: {
+    backgroundColor: "rgba(255, 193, 7, 0.2)",
+  },
+  publicidadPendienteAprobacionText: {
+    fontSize: 12,
+    color: "#ffc107",
+    fontWeight: "600",
+  },
+  publicidadExpiradaBadge: {
+    backgroundColor: "rgba(158, 158, 158, 0.2)",
+  },
+  publicidadExpiradaText: {
+    fontSize: 12,
+    color: "#9e9e9e",
+    fontWeight: "600",
+  },
+  publicidadMotivoRechazoContainer: {
+    backgroundColor: "rgba(255, 107, 107, 0.1)",
+    padding: 10,
+    borderRadius: 6,
+    marginTop: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: "#ff6b6b",
+  },
+  publicidadMotivoRechazoLabel: {
+    fontSize: 11,
+    color: "#ff6b6b",
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  publicidadMotivoRechazoText: {
+    fontSize: 12,
+    color: "#ffcccc",
+    lineHeight: 16,
   },
   publicidadActionsLarge: {
     flexDirection: "row",
@@ -2455,6 +2713,42 @@ rejectionBanner: {
     shadowRadius: 2,
     elevation: 3,
   },
+  pagoBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(76, 175, 80, 0.9)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 1,
+  },
+  pagoBadgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  pendientePagoBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(255, 152, 0, 0.9)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 1,
+  },
+  pendientePagoBadgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
   // Agregando estilos para el botón de crear publicidad en el modal
   createPublicidadButton: {
     flexDirection: "row",
@@ -2491,80 +2785,120 @@ rejectionBanner: {
     marginLeft: 5,
     fontWeight: "bold",
   },
-   pagoBadge: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: "rgba(76, 175, 80, 0.9)",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+  // Agregando estilos para las secciones de publicidades (pendientes, activas, etc.)
+  publicidadesSection: {
+    marginBottom: 24,
+    backgroundColor: "rgba(42, 42, 62, 0.3)",
     borderRadius: 12,
-    zIndex: 1,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: "#ffc107",
   },
-  pagoBadgeText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "600",
-    marginLeft: 4,
-  },
-  pendientePagoBadge: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: "rgba(255, 152, 0, 0.9)",
+  sectionHeaderContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    zIndex: 1,
+    marginBottom: 8,
+    gap: 10,
   },
-  pendientePagoBadgeText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "600",
-    marginLeft: 4,
+  sectionHeaderTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#ffc107",
   },
-  payPublicidadButton: {
-    backgroundColor: "#4CAF50",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  sectionDescription: {
+    fontSize: 13,
+    color: "#999",
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  deletePublicidadButton: {
+    backgroundColor: "rgba(220, 53, 69, 0.2)",
+    padding: 10,
     borderRadius: 8,
-    marginLeft: 8,
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "rgba(220, 53, 69, 0.4)",
   },
-  payPublicidadButtonText: {
-    color: "white",
+  deletePublicidadButtonText: {
+    color: "#e6bebeff",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  // Add styles for editPublicidadButton and editPublicidadButtonText
+  editPublicidadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f0e6ff",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#5c288c",
+  },
+  editPublicidadButtonText: {
+    color: "#5c288c",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 5,
+  },
+  publicidadPagaBadge: {
+    backgroundColor: "rgba(76, 175, 80, 0.2)",
+    borderColor: "#4caf50",
+    borderWidth: 1,
+  },
+  publicidadPagaText: {
+    color: "#4caf50",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  publicidadEditButton: {
+    backgroundColor: "#D838F5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 8,
+    gap: 6,
+  },
+  publicidadEditButtonText: {
+    color: "#fff",
     fontSize: 14,
     fontWeight: "600",
-    marginLeft: 4,
   },
-  publicidadPendienteAprobacionBadge: {
-  backgroundColor: "rgba(33, 150, 243, 0.2)",
-},
-publicidadRechazadaBadge: {
-  backgroundColor: "rgba(244, 67, 54, 0.2)",
-},
-publicidadExpiradaBadge: {
-  backgroundColor: "rgba(158, 158, 158, 0.2)",
-},
-publicidadPendienteAprobacionText: {
-  fontSize: 12,
-  color: "#2196f3",
-  fontWeight: "600",
-},
-publicidadRechazadaText: {
-  fontSize: 12,
-  color: "#f44336",
-  fontWeight: "600",
-},
-publicidadExpiradaText: {
-  fontSize: 12,
-  color: "#9e9e9e",
-  fontWeight: "600",
-},
+
+  publicidadDeleteButtonSmall: {
+    backgroundColor: "#e60f0f85",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    marginTop: 4,
+    gap: 6,
+  },
+  publicidadEditPayButton: {
+    backgroundColor: "#FF6B00",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+  },
+  publicidadEditPayButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
 })
 export default BarManagement
