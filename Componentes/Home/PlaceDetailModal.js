@@ -26,9 +26,10 @@ const PlaceDetailModal = ({ place, visible, onClose, onDirectionClick,onNavigate
   const [showReviewModal, setShowReviewModal] = useState(false)
 const [reviews, setReviews] = useState([]) // Added reviews state
   const [showAllReviews, setShowAllReviews] = useState(false) // Added show all reviews state
+  
   console.log("🔍 PlaceDetailModal render - visible:", visible, "place:", place?.name)
 const [averageRating, setAverageRating] = useState(0)
- //const [hasLoadedReviews, setHasLoadedReviews] = useState(false)
+
 
  useEffect(() => {
     // Reset reviews state when place changes or modal closes
@@ -338,7 +339,7 @@ const renderStars = (rating) => {
         </View>
 
         {displayedReviews.map((review, index) => {
-          console.log("[v0] Rendering review:", review.iD_Resenia, "Comment:", review.comentario?.substring(0, 30))
+          console.log("Rendering review:", review.iD_Resenia, "Comment:", review.comentario?.substring(0, 30))
           return (
           <View key={review.iD_Resenia || index} style={styles.reviewItem}>
             <View style={styles.reviewHeader}>
@@ -383,7 +384,15 @@ const renderStars = (rating) => {
               <AntDesign name="close" size={24} color="#f089faad" />
             </View>
           </TouchableOpacity>
-
+{!!place.isLocal && (
+            <View style={styles.premiumBanner}>
+              <Text style={styles.premiumBannerIcon}>⭐</Text>
+              <View style={styles.premiumBannerTextContainer}>
+                <Text style={styles.premiumBannerTitle}>Comercio Premium</Text>
+                <Text style={styles.premiumBannerSubtitle}>✓ Hace reservas ✓ Deja reseñas ✓ Ofertas exclusivas</Text>
+              </View>
+            </View>
+          )}
           <Text numberOfLines={2} style={styles.name}>
             {safeString(place.name, "Nombre no disponible")}
           </Text>
@@ -862,6 +871,72 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  ratingHeaderContainer: {
+    gap: 8,
+  },
+  averageRatingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 5,
+  },
+  starsRowDisplay: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  averageRatingText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#ffd700",
+  },
+  reviewUserContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  premiumBanner: {
+		   
+	
+						   
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFD700",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 15,
+    marginTop: 10,
+    borderWidth: 2,
+    borderColor: "#FFA500",
+    shadowColor: "#FFD700",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  premiumBannerIcon: {
+    fontSize: 32,
+    marginRight: 12,
+		   
+  },
+  premiumBannerTextContainer: {
+    flex: 1,
+  },
+  premiumBannerTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#000",
+    marginBottom: 4,
+  },
+  premiumBannerSubtitle: {
+    fontSize: 12,
+    color: "#333",
+    fontWeight: "600",
+  },
+
 })
 
 export default PlaceDetailModal

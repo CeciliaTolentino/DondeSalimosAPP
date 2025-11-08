@@ -50,13 +50,18 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
   }, [selectedPlace])
 
   useEffect(() => {
-    console.log("🗺️ GoogleMapViewFull - placeList actualizado:", placeList.length)
-    console.log("📍 Lugares por fuente:", {
-      google: placeList.filter((p) => !p.isLocal).length,
-      local: placeList.filter((p) => p.isLocal).length,
+     console.log("🗺️ GoogleMapViewFull - placeList actualizado:", placeList.length)
+   const selectedTypes = onSearch?.selectedTypes || ""
+    const filteredPlaces = filterPlacesByType(placeList, selectedTypes)
+
+    console.log("📍 Lugares después de filtrado por tipo:", {
+      total: placeList.length,
+      filtered: filteredPlaces.length,
+      google: filteredPlaces.filter((p) => !p.isLocal).length,
+      local: filteredPlaces.filter((p) => p.isLocal).length,
     })
 
-    placeList.forEach((place, index) => {
+    filteredPlaces.forEach((place, index) => {
       console.log(`📍 Lugar ${index + 1}:`, {
         name: place?.name,
         isLocal: place?.isLocal,
@@ -219,10 +224,51 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
       setTemporaryPlace(null)
       onPlaceSelect(null)
     }
+    }
+
+  const filterPlacesByType = (places, selectedTypes) => {
+    if (!selectedTypes || selectedTypes.length === 0) {
+      return places
+    }
+
+    const typesArray = selectedTypes.split(",").filter((t) => t.trim())
+
+    return places.filter((place) => {
+      // Para lugares de Google, usar el array types
+      if (!place.isLocal && place.types) {
+        // Si solo se seleccionó "bar", excluir night_clubs
+        if (typesArray.includes("bar") && !typesArray.includes("night_club")) {
+          return place.types.includes("bar") && !place.types.includes("night_club")
+        }
+        // Si solo se seleccionó "night_club", excluir bars
+        if (typesArray.includes("night_club") && !typesArray.includes("bar")) {
+        //  return place.types.includes("night_club") && !place.types.includes("bar")
+        const hasBarInName = place.name?.toLowerCase().includes("bar")
+          const hasBarInTypes = place.types.includes("bar")
+          const isNightClub = place.types.includes("night_club")
+
+          // Excluir si tiene "bar" en el nombre O en los tipos, a menos que sea claramente un boliche
+          if (hasBarInName || hasBarInTypes) {
+            console.log(`🚫 Excluyendo "${place.name}" - contiene "bar"`)
+            return false
+          }
+
+          return isNightClub
+        }
+        // Si se seleccionaron ambos, incluir cualquiera
+        return place.types.some((type) => typesArray.includes(type))
+      }
+
+      // Para comercios locales, ya están filtrados correctamente
+      return true
+    })
   }
 
   const markers = useMemo(() => {
-    return placeList.map((item, index) => {
+   const selectedTypes = onSearch?.selectedTypes || ""
+    const filteredPlaces = filterPlacesByType(placeList, selectedTypes)
+
+    return filteredPlaces.map((item, index) => {
       if (!item.geometry || !item.geometry.location || !item.geometry.location.lat || !item.geometry.location.lng) {
         console.warn("⚠️ Lugar sin coordenadas válidas:", item.name)
         return null
@@ -246,8 +292,9 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
         />
       )
     })
-  }, [placeList, selectedPlace])
- const handleNavigateToLogin = useCallback(() => {
+   }, [placeList, selectedPlace, onSearch])
+
+  const handleNavigateToLogin = useCallback(() => {
     console.log("🚪 Usuario navegando al login - limpiando estados")
     setTemporaryPlace(null)
     onPlaceSelect(null)
