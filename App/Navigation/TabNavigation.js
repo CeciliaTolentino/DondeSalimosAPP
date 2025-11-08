@@ -5,10 +5,10 @@ import { Alert } from "react-native"
 import { useNavigation } from "@react-navigation/native"
 import HomeNavigation from "./HomeNavigation"
 import Login from "../Pantallas/Login"
-import Fav from "../Pantallas/Fav"
+//import Fav from "../Pantallas/Fav"
 import Profile from "../Pantallas/Profile"
 import BarManagement from "../Pantallas/BarManagment"
-import Reserva from '../../Componentes/Home/Reserva'
+import Reservas from '../../Componentes/Home/Reserva'
 import AdminPanel from "../Pantallas/AdminPanel"
 import { AuthContext } from "../../AuthContext"
 import RestrictedAccess from "../Pantallas/RestrictedAccess"
@@ -35,7 +35,7 @@ export default function TabNavigation() {
   }
 
   if (isLoading) {
-    return null // O un componente de carga
+    return null 
   }
 
   return (
@@ -45,8 +45,6 @@ export default function TabNavigation() {
           let iconName
           if (route.name === "Home") {
             iconName = "home"
-          } else if (route.name === "Fav") {
-            iconName = "favorite"
           } else if (route.name === "Reservas") {
             iconName = "event" 
           } else if (route.name === "AdminPanel") {
@@ -74,11 +72,11 @@ export default function TabNavigation() {
         }}
       />
 
-      {/* Para usuarios comunes: Favoritos */}
+      
       {isCommonUser && (
         <Tab.Screen
-          name="Fav"
-          component={isRegistered ? Fav : RestrictedAccess}
+          name="Reservas"
+          component={isRegistered ? Reservas : RestrictedAccess}
           listeners={{
             tabPress: (e) => {
               if (!isRegistered) {
@@ -87,7 +85,8 @@ export default function TabNavigation() {
               }
             },
           }}
-          options={{ headerShown: false }}
+          options={{ headerShown: false,
+            tabBarLabel: "Reservas" }}
         />
       )}
 
@@ -95,7 +94,7 @@ export default function TabNavigation() {
       {isBarOwner && (
         <Tab.Screen
           name="Reservas"
-          component={Reserva}
+          component={Reservas}
           options={{
             headerShown: false,
             tabBarLabel: "Reservas",

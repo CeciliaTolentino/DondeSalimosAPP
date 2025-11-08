@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useContext } from "react"
 import {
   View,
@@ -11,28 +10,47 @@ import {
   ScrollView,
   ActivityIndicator,
   Modal,
+    Linking,
   FlatList,
 } from "react-native"
 import { AntDesign, MaterialCommunityIcons } from "@expo/vector-icons"
 import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
 import { AuthContext } from "../../AuthContext"
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL
-
+import Apis from "../../Apis"
+import { validateCUIT, formatCUIT } from "../../utils/cuitValidador"
+import PublicidadModal from "./../../Componentes/Home/publicidadModal"
+import { Picker } from "@react-native-picker/picker"
 const ComercioCard = ({ comercio, onPress }) => {
-  const convertBase64ToImage = (base64String) => {
+ const convertBase64ToImage = (base64String) => {
     if (!base64String) return null
+
+    // Si ya tiene el prefijo data:image, devolverlo tal cual
+    if (base64String.startsWith("data:image")) {
+      return base64String
+    }
+
+    // Si no tiene el prefijo, agregarlo
     return `data:image/jpeg;base64,${base64String}`
   }
 
   const getImageSource = () => {
+    console.log(`DEBUG - ComercioCard para: ${comercio.nombre}`)
+    console.log(`DEBUG - comercio.foto existe: ${!!comercio.foto}`)
+    console.log(`DEBUG - comercio.foto length: ${comercio.foto?.length || 0}`)
+
     if (comercio.foto) {
-      return { uri: convertBase64ToImage(comercio.foto) }
+      console.log(`DEBUG - Primeros 50 caracteres de foto: ${comercio.foto.substring(0, 50)}`)
+      const imageUri = convertBase64ToImage(comercio.foto)
+      console.log(`DEBUG - Imagen URI generada: ${imageUri ? imageUri.substring(0, 50) + "..." : "null"}`)
+      return { uri: imageUri }
     }
-    return require("../../assets/placeholder.jpg")
+
+    console.log(`DEBUG - ${comercio.nombre} - No tiene foto, usando placeholder`)
+ return require("../../assets/placeholder.jpg")
   }
 
+  const isApproved = comercio.estado === true
   return (
     <TouchableOpacity onPress={() => onPress(comercio)} style={styles.cardContainer}>
       <Image
@@ -40,6 +58,11 @@ const ComercioCard = ({ comercio, onPress }) => {
         style={styles.cardImage}
         defaultSource={require("../../assets/placeholder.jpg")}
       />
+      {isApproved && (
+        <View style={styles.approvedBadge}>
+          <MaterialCommunityIcons name="check-circle" size={24} color="#4CAF50" />
+        </View>
+      )}
       <View style={styles.cardInfoContainer}>
         <Text numberOfLines={2} style={styles.cardName}>
           {comercio.nombre}
@@ -55,14 +78,18 @@ const ComercioCard = ({ comercio, onPress }) => {
   )
 }
 
-export default function BarManagement() {
+const BarManagement = ({ navigation }) => {
   const { user, isAuthenticated, isBarOwner } = useContext(AuthContext)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
+  const [createModalVisible, setCreateModalVisible] = useState(false)
   const [selectedComercio, setSelectedComercio] = useState(null)
   const [comerciosList, setComerciosList] = useState([])
+  const [publicidadModalVisible, setPublicidadModalVisible] = useState(false)
+  const [publicidadesList, setPublicidadesList] = useState([])
+  const [selectedPublicidad, setSelectedPublicidad] = useState(null)
 
   // Estados para los campos editables
   const [nombre, setNombre] = useState("")
@@ -74,15 +101,127 @@ export default function BarManagement() {
   const [closingHours, setClosingHours] = useState("")
   const [businessImage, setBusinessImage] = useState(null)
   const [businessImageBase64, setBusinessImageBase64] = useState(null)
-  const [advertisingImage, setAdvertisingImage] = useState(null)
 
+ const [newComercioData, setNewComercioData] = useState({
+    ID_TipoComercio: 1,
+    Nombre: "",
+    Capacidad: "",
+    Mesas: "",
+    GeneroMusical: "",
+    TipoDocumento: "CUIT",
+    NroDocumento: "",
+    Direccion: "",
+    Correo: "",
+    Telefono: "",
+  })
+  const [areaCode, setAreaCode] = useState("+54")
+  const [newComercioImage, setNewComercioImage] = useState(null)
+  const [newComercioImageBase64, setNewComercioImageBase64] = useState(null)
+const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
+  const [newComercioHoraCierre, setNewComercioHoraCierre] = useState("")
+
+  const [activeTab, setActiveTab] = useState("comercios")
+  const [todasPublicidades, setTodasPublicidades] = useState([])
   useEffect(() => {
     if (isAuthenticated && user) {
       checkUserAccess()
     } else {
       setIsLoading(false)
     }
-  }, [isAuthenticated, user])
+
+    const handlePaymentReturn = async (event) => {
+      const url = event.url
+      console.log("Deep link received:", url)
+
+      if (url.includes("payment/success")) {
+        const urlParams = new URL(url).searchParams
+        const paymentId = urlParams.get("payment_id")
+        const preferenceId = urlParams.get("preference_id")
+
+        console.log("Payment success - ID:", paymentId, "Preference:", preferenceId)
+
+        if (paymentId && preferenceId) {
+          try {
+            console.log("Verificando pago con backend...")
+            const verifyResponse = await Apis.verificarYActivarPago(paymentId, preferenceId)
+
+            if (verifyResponse.status === 200 && verifyResponse.data.success) {
+              const publicidadId = verifyResponse.data.publicidadId
+
+              console.log("Pago verificado, activando publicidad:", publicidadId)
+
+              const publicidadResponse = await Apis.obtenerPublicidadesPorId(publicidadId)
+              const publicidadData = publicidadResponse.data
+
+              console.log("Publicidad obtenida:", publicidadData)
+
+              await Apis.actualizarPublicidad(publicidadId, {
+                descripcion: publicidadData.descripcion,
+                visualizaciones: publicidadData.visualizaciones,
+                tiempo: publicidadData.tiempo,
+                estado: false, 
+                fechaCreacion: publicidadData.fechaCreacion,
+                iD_Comercio: publicidadData.iD_Comercio,
+                iD_TipoComercio: publicidadData.iD_TipoComercio,
+                foto: publicidadData.imagen,
+                pago: true,  
+              })
+
+              console.log("Publicidad activada exitosamente")
+
+              setPublicidadModalVisible(false)
+              setSelectedPublicidad(null)
+
+              Alert.alert(
+               "¡Pago exitoso!",
+  "Tu pago ha sido procesado. La publicidad está pendiente de aprobación del administrador.",
+                [
+                  {
+                    text: "Ver mis publicidades",
+                    onPress: () => {
+                      setActiveTab("publicidades")
+                      if (selectedComercio) {
+                        loadPublicidades(selectedComercio.iD_Comercio)
+                      }
+                    },
+                  },
+                ],
+              )
+            }
+          } catch (error) {
+            console.error("Error al verificar/activar pago:", error)
+            Alert.alert("Error", "Hubo un problema al activar tu publicidad. Por favor contacta a soporte.", [
+              { text: "Entendido" },
+            ])
+          }
+        }
+      } else if (url.includes("payment/failure")) {
+        setPublicidadModalVisible(false)
+        setSelectedPublicidad(null)
+
+        Alert.alert("Pago Rechazado", "El pago no pudo ser procesado. Tu publicidad quedará pendiente de pago.", [
+          {
+            text: "Entendido",
+            onPress: () => {
+              if (selectedComercio) {
+                loadPublicidades(selectedComercio.iD_Comercio)
+              }
+            },
+          },
+        ])
+      } else if (url.includes("payment/pending")) {
+        Alert.alert("Pago Pendiente", "Tu pago está siendo procesado. Te notificaremos cuando se confirme.", [
+          { text: "Entendido" },
+        ])
+      }
+    }
+
+    const subscription = Linking.addEventListener("url", handlePaymentReturn)
+
+    return () => {
+      subscription.remove()
+    }
+  }, [isAuthenticated, user, selectedComercio])
 
   // Función para convertir imagen a base64
   const convertImageToBase64 = async (imageUri) => {
@@ -98,22 +237,40 @@ export default function BarManagement() {
   }
 
   // Función para convertir base64 a URI de imagen
-  const convertBase64ToImage = (base64String) => {
+ const convertBase64ToImage = (base64String) => {
     if (!base64String) return null
+
+    // Si ya tiene el prefijo data:image, devolverlo tal cual
+    if (base64String.startsWith("data:image")) {
+      return base64String
+    }
+
+    // Si no tiene el prefijo, agregarlo
     return `data:image/jpeg;base64,${base64String}`
   }
 
   // Función para formatear hora de HH:MM a HH:MM:SS
   const formatTimeWithSeconds = (timeString) => {
-    if (!timeString) return ""
-    if (timeString.includes(":") && timeString.split(":").length === 3) {
-      return timeString
-    }
-    if (timeString.includes(":") && timeString.split(":").length === 2) {
-      return `${timeString}:00`
+   if (!timeString || timeString.trim() === "") return null
+
+    // Si ya tiene formato HH:MM:SS, verificar que tenga ceros adelante
+    if (timeString.includes(":")) {
+      const parts = timeString.split(":")
+      if (parts.length === 3) {
+        const hours = parts[0].padStart(2, "0")
+        const minutes = parts[1].padStart(2, "0")
+        const seconds = parts[2].padStart(2, "0")
+        return `${hours}:${minutes}:${seconds}`
+      }
+      if (parts.length === 2) {
+        const hours = parts[0].padStart(2, "0")
+        const minutes = parts[1].padStart(2, "0")
+        return `${hours}:${minutes}:00`
+      }
     }
     return timeString
   }
+
 
   // Función para formatear hora de HH:MM:SS a HH:MM para mostrar
   const formatTimeForDisplay = (timeString) => {
@@ -124,7 +281,16 @@ export default function BarManagement() {
     }
     return timeString
   }
+ const formatDateDDMMYY = (date) => {
+    if (!date) return "Sin fecha"
 
+    const d = new Date(date)
+    const day = String(d.getDate()).padStart(2, "0")
+    const month = String(d.getMonth() + 1).padStart(2, "0") // Months are 0-indexed
+    const year = String(d.getFullYear()).slice(-2) // Get last 2 digits of year
+
+    return `${day}/${month}/${year}`
+  }
   const checkUserAccess = async () => {
     try {
       if (!isBarOwner || user.iD_RolUsuario !== 3) {
@@ -142,18 +308,13 @@ export default function BarManagement() {
     try {
       console.log("Buscando comercios para usuario:", user.iD_Usuario)
 
-      const response = await fetch(`${API_BASE_URL}/api/comercios/listado`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
+      const response = await Apis.obtenerComerciosListado()
 
-      if (response.ok) {
-        const comercios = await response.json()
+      if (response.status === 200) {
+        const comercios = response.data
         const userComercios = comercios.filter((comercio) => comercio.iD_Usuario === user.iD_Usuario)
 
-        console.log("Comercios encontrados:", userComercios)
+      //  console.log("Comercios encontrados:", userComercios)
         setComerciosList(userComercios)
       } else {
         setComerciosList([])
@@ -175,8 +336,8 @@ export default function BarManagement() {
     setCapacidad(comercio.capacidad?.toString() || "")
     setMesas(comercio.mesas?.toString() || "")
     setGeneroMusical(comercio.generoMusical || "")
-    setOpeningHours(formatTimeForDisplay(comercio.hora_ingreso || ""))
-    setClosingHours(formatTimeForDisplay(comercio.hora_cierre || ""))
+    setOpeningHours(formatTimeForDisplay(comercio.horaIngreso || ""))
+    setClosingHours(formatTimeForDisplay(comercio.horaCierre || ""))
 
     if (comercio.foto) {
       const imageUri = convertBase64ToImage(comercio.foto)
@@ -187,7 +348,7 @@ export default function BarManagement() {
       setBusinessImageBase64(null)
     }
 
-    setAdvertisingImage(comercio.imagenPublicidad)
+    loadPublicidades(comercio.iD_Comercio)
   }
 
   const handleImagePicker = async (setImageFunction, imageType) => {
@@ -203,10 +364,14 @@ export default function BarManagement() {
         const imageUri = result.assets[0].uri
         setImageFunction(imageUri)
 
-        if (imageType === "businessImage") {
+        if (imageType === "businessImage" || imageType === "newComercioImage") {
           const base64 = await convertImageToBase64(imageUri)
           if (base64) {
+             if (imageType === "businessImage") {
             setBusinessImageBase64(base64)
+            } else if (imageType === "newComercioImage") {
+              setNewComercioImageBase64(base64)
+            }
             console.log("Imagen convertida a base64 exitosamente")
           } else {
             Alert.alert("Error", "No se pudo procesar la imagen.")
@@ -230,8 +395,8 @@ export default function BarManagement() {
       setCapacidad(selectedComercio.capacidad?.toString() || "")
       setMesas(selectedComercio.mesas?.toString() || "")
       setGeneroMusical(selectedComercio.generoMusical || "")
-      setOpeningHours(formatTimeForDisplay(selectedComercio.hora_ingreso || ""))
-      setClosingHours(formatTimeForDisplay(selectedComercio.hora_cierre || ""))
+      setOpeningHours(formatTimeForDisplay(selectedComercio.horaIngreso || ""))
+      setClosingHours(formatTimeForDisplay(selectedComercio.horaCierre || ""))
 
       if (selectedComercio.foto) {
         const imageUri = convertBase64ToImage(selectedComercio.foto)
@@ -241,8 +406,6 @@ export default function BarManagement() {
         setBusinessImage(null)
         setBusinessImageBase64(null)
       }
-
-      setAdvertisingImage(selectedComercio.imagenPublicidad)
     }
     setIsEditing(false)
   }
@@ -271,26 +434,51 @@ export default function BarManagement() {
 
     setIsSaving(true)
     try {
+      console.log("DEBUG - Estados antes de guardar:")
+      console.log("openingHours:", openingHours)
+      console.log("closingHours:", closingHours)
+      const cleanTipoDocumento = selectedComercio.tipoDocumento.replace(/\s+/g, "")
+      const cleanTelefono = selectedComercio.telefono.replace(/\s+/g, "") // Remover espacios
+      const cleanNroDocumento = selectedComercio.nroDocumento.replace(/-/g, "") // Remover guiones para validar
+
+      if (cleanTipoDocumento === "CUIT") {
+        const cuitValidation = validateCUIT(cleanNroDocumento)
+        if (!cuitValidation.valid) {
+          Alert.alert("Error de validación", cuitValidation.message)
+          setIsSaving(false)
+          return
+        }
+      }
+ const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
+ //Formatear horarios correctamente, devolviendo null si están vacíos
+      const horaIngresoFormatted = formatTimeWithSeconds(openingHours)
+      const horaCierreFormatted = formatTimeWithSeconds(closingHours)
+
+      // DEBUG - Horarios formateados:
+      console.log("DEBUG - Horarios formateados:")
+      console.log("horaIngresoFormatted:", horaIngresoFormatted)
+      console.log("horaCierreFormatted:", horaCierreFormatted)
       const updatedComercio = {
         iD_Comercio: selectedComercio.iD_Comercio,
         nombre: nombre.trim(),
         capacidad: Number.parseInt(capacidad) || 0,
         mesas: Number.parseInt(mesas) || 0,
         generoMusical: generoMusical.trim(),
-        tipoDocumento: selectedComercio.tipoDocumento,
-        nroDocumento: selectedComercio.nroDocumento,
+        tipoDocumento: cleanTipoDocumento,
+        nroDocumento: cleanTipoDocumento === "CUIT" ? formatCUIT(cleanNroDocumento) : cleanNroDocumento,
         direccion: direccion.trim(),
         correo: selectedComercio.correo,
-        telefono: selectedComercio.telefono,
-        estado: selectedComercio.estado,
+        telefono: cleanTelefono,
+         estado: isRechazado ? false : selectedComercio.estado,
         fechaCreacion: selectedComercio.fechaCreacion,
-        hora_ingreso: formatTimeWithSeconds(openingHours),
-        hora_cierre: formatTimeWithSeconds(closingHours),
-        foto: businessImageBase64 || "",
+         horaIngreso: horaIngresoFormatted,
+        horaCierre: horaCierreFormatted,
+        foto: businessImageBase64 || selectedComercio.foto || "",
         iD_Usuario: selectedComercio.iD_Usuario,
         iD_TipoComercio: selectedComercio.iD_TipoComercio,
         usuario: selectedComercio.usuario || null,
         tipoComercio: selectedComercio.tipoComercio || null,
+       MotivoRechazo: isRechazado ? null : (selectedComercio.motivoRechazo ?? null),
       }
 
       console.log("Actualizando comercio:", {
@@ -298,49 +486,439 @@ export default function BarManagement() {
         foto: updatedComercio.foto ? `[Base64 string of length: ${updatedComercio.foto.length}]` : "No image",
       })
 
-      const response = await fetch(`${API_BASE_URL}/api/comercios/actualizar/${selectedComercio.iD_Comercio}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(updatedComercio),
-      })
+      const response = await Apis.actualizarComercio(selectedComercio.iD_Comercio, updatedComercio)
 
-      if (response.ok) {
-        Alert.alert("Éxito", "La información del comercio ha sido actualizada.")
+      if (response.status === 200 || response.status === 201 || response.status === 204) {
+   if (isRechazado) {
+          Alert.alert(
+            "Éxito",
+            "La información del comercio ha sido actualizada y enviada nuevamente para aprobación del administrador.",
+          )
+        } else {
+          Alert.alert("Éxito", "La información del comercio ha sido actualizada.")
+        }
         await loadComerciosList()
+        // Obtener el comercio actualizado del backend
+        const updatedComerciosListResponse = await Apis.obtenerComerciosListado()
+        if (updatedComerciosListResponse.status === 200) {
+          const comercioActualizado = updatedComerciosListResponse.data.find(
+            (c) => c.iD_Comercio === selectedComercio.iD_Comercio,
+          )
+
+          if (comercioActualizado) {
+            // Actualizar selectedComercio con los datos frescos del backend
+            setSelectedComercio(comercioActualizado)
+
+            // Actualizar los campos de visualización con los nuevos datos
+            setNombre(comercioActualizado.nombre || "")
+            setDireccion(comercioActualizado.direccion || "")
+            setCapacidad(comercioActualizado.capacidad?.toString() || "")
+            setMesas(comercioActualizado.mesas?.toString() || "")
+            setGeneroMusical(comercioActualizado.generoMusical || "")
+            setOpeningHours(formatTimeForDisplay(comercioActualizado.horaIngreso || ""))
+            setClosingHours(formatTimeForDisplay(comercioActualizado.horaCierre || ""))
+
+            if (comercioActualizado.foto) {
+              const imageUri = convertBase64ToImage(comercioActualizado.foto)
+              setBusinessImage(imageUri)
+              setBusinessImageBase64(comercioActualizado.foto)
+            } else {
+              setBusinessImage(null)
+              setBusinessImageBase64(null)
+            }
+          }
+        }
+
         setIsEditing(false)
 
-        if (advertisingImage) {
-          Alert.alert(
-            "Pago de Publicidad",
-            "Su evento aparecerá en las historias por diez días al precio de $1000 pesos. Será redirigido a MercadoPago para realizar el pago.",
-            [{ text: "OK", onPress: () => console.log("Redirigiendo a MercadoPago...") }],
-          )
+        if (isRechazado) {
+          setModalVisible(false)
         }
       } else {
-        const errorText = await response.text()
-        console.error("Error al actualizar:", errorText)
         throw new Error("Error al actualizar comercio")
       }
     } catch (error) {
       console.error("Error al guardar:", error)
-      Alert.alert("Error", "No se pudo guardar la información.")
+      const errorMessage = error.response?.data?.message || error.message || "No se pudo guardar la información."
+      Alert.alert("Error", errorMessage)
     } finally {
       setIsSaving(false)
     }
   }
 
   const handleCreateNewComercio = () => {
-    Alert.alert("Crear Nuevo Comercio", "¿Desea crear un nuevo comercio? Será redirigido al formulario de registro.", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Crear",
+    setCreateModalVisible(true)
+    // Resetear datos del formulario
+    setNewComercioData({
+      ID_TipoComercio: 1,
+      Nombre: "",
+      Capacidad: "",
+      Mesas: "",
+      GeneroMusical: "",
+      TipoDocumento: "CUIT",
+      NroDocumento: "",
+      Direccion: "",
+      Correo: "",
+      Telefono: "",
+    })
+    
+    setNewComercioImage(null)
+    setNewComercioImageBase64(null)
+    setNewComercioHoraIngreso("")
+    setNewComercioHoraCierre("")
+  }
+
+  useEffect(() => {
+    if (user && user.iD_Usuario) {
+      loadComerciosList()
+      
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (activeTab === "publicidades" && comerciosList.length > 0) {
+      loadTodasPublicidades()
+    }
+  }, [activeTab, comerciosList])
+
+  const loadTodasPublicidades = async () => {
+    try {
+      console.log("Cargando todas las publicidades del usuario...")
+      const response = await Apis.obtenerPublicidadesListado()
+      if (response.status === 200) {
+        const allPublicidades = response.data
+        const now = new Date()
+
+        // Filtrar solo las publicidades de los comercios del usuario
+        const comerciosIds = comerciosList.map((c) => c.iD_Comercio)
+        const userPublicidades = allPublicidades
+          .filter((pub) => comerciosIds.includes(pub.iD_Comercio))
+          .map((pub) => {
+            const fechaCreacion = new Date(pub.fechaCreacion || pub.FechaCreacion)
+            const dias = getDiasFromTiempo(pub.tiempo)
+            const fechaExpiracion = new Date(fechaCreacion)
+            fechaExpiracion.setDate(fechaExpiracion.getDate() + dias)
+
+            // Encontrar el nombre del comercio
+            const comercio = comerciosList.find((c) => c.iD_Comercio === pub.iD_Comercio)
+
+            return {
+              ...pub,
+              fechaExpiracionCalculada: fechaExpiracion,
+              nombreComercio: comercio?.nombre || "Comercio desconocido",
+              isRechazada: pub.motivoRechazo && pub.motivoRechazo.trim() !== "",
+            }
+          })
+
+        console.log("Publicidades del usuario cargadas:", userPublicidades.length)
+        setTodasPublicidades(userPublicidades)
+      }
+    } catch (error) {
+      console.error("Error al cargar todas las publicidades:", error)
+      setTodasPublicidades([])
+    }
+  }
+
+  
+  const renderPublicidadesPanel = () => {
+    // Agrupar publicidades por comercio
+    const publicidadesPorComercio = {}
+    todasPublicidades.forEach((pub) => {
+      if (!publicidadesPorComercio[pub.iD_Comercio]) {
+        publicidadesPorComercio[pub.iD_Comercio] = {
+          nombreComercio: pub.nombreComercio,
+          publicidades: [],
+        }
+      }
+      publicidadesPorComercio[pub.iD_Comercio].publicidades.push(pub)
+    })
+
+    const getPublicidadImageSource = (pub) => {
+      const imageData = pub.imagen || pub.foto
+      if (!imageData) {
+        return require("../../assets/placeholder.jpg")
+      }
+      if (imageData.startsWith("data:image")) {
+        return { uri: imageData }
+      }
+      return { uri: `data:image/jpeg;base64,${imageData}` }
+    }
+
+    return (
+      <ScrollView style={styles.publicidadesPanel}>
+        <Text style={styles.panelTitle}>Mis Publicidades</Text>
+
+        {todasPublicidades.length === 0 ? (
+          <View style={styles.emptyState}>
+            <MaterialCommunityIcons name="billboard" size={64} color="#666" />
+            <Text style={styles.emptyStateText}>No tienes publicidades</Text>
+          </View>
+        ) : (
+          Object.entries(publicidadesPorComercio).map(([comercioId, data]) => (
+            <View key={comercioId} style={styles.comercioPublicidadesGroup}>
+              <Text style={styles.comercioGroupTitle}>{data.nombreComercio}</Text>
+
+              {data.publicidades.map((pub) => {
+                const fechaExpiracionStr = formatDateDDMMYY(pub.fechaExpiracionCalculada)
+                const isExpired = pub.fechaExpiracionCalculada < new Date()
+
+                return (
+                  <View
+                    key={pub.iD_Publicidad}
+                    style={[styles.publicidadCardLarge, pub.isRechazada && styles.publicidadRechazada]}
+                  >
+                    {pub.isRechazada && (
+                      <View style={styles.publicidadRejectionBanner}>
+                        <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
+                        <View style={styles.publicidadRejectionTextContainer}>
+                          <Text style={styles.publicidadRejectionTitle}>Publicidad Rechazada</Text>
+                          <Text style={styles.publicidadRejectionMessage}>{pub.motivoRechazo}</Text>
+                        </View>
+                      </View>
+                    )}
+
+                    <View style={styles.publicidadCardContent}>
+                      <Image
+                        source={getPublicidadImageSource(pub)}
+                        style={styles.publicidadImageLarge}
+                        defaultSource={require("../../assets/placeholder.jpg")}
+                        resizeMode="cover"
+                      />
+
+                      <View style={styles.publicidadInfoLarge}>
+                        <Text style={styles.publicidadTiempoLarge}>{getTiempoLabel(pub.tiempo)}</Text>
+                        <Text style={styles.publicidadViewsLarge}>
+                          <MaterialCommunityIcons name="eye" size={16} color="#D838F5" /> {pub.visualizaciones}{" "}
+                          visualizaciones
+                        </Text>
+                        <Text style={styles.publicidadExpiracionLarge}>
+                          {isExpired ? "Expirada" : `Vence: ${fechaExpiracionStr}`}
+                        </Text>
+
+                           {/* Badges de estado */}
+                        {pub.isRechazada && (
+                          <View style={[styles.publicidadStatusBadge, styles.publicidadRechazadaBadge]}>
+                            <Text style={styles.publicidadRechazadaText}> Rechazada</Text>
+                          </View>
+                        )}
+                       {!pub.estado && pub.pago && !pub.isRechazada && (
+                          <View style={[styles.publicidadStatusBadge, styles.publicidadPendienteAprobacionBadge]}>
+                            <Text style={styles.publicidadPendienteAprobacionText}>⏳ Pendiente de aprobación</Text>
+                          </View>
+                        )}
+
+                         {!pub.estado && !pub.pago && !pub.isRechazada && (
+                          <View style={styles.publicidadStatusBadge}>
+                            <Text style={styles.publicidadPendienteText}>💳 Pendiente de pago</Text>
+                          </View>
+                        )}
+                        
+                        {pub.estado && pub.pago && !isExpired && (
+                          <View style={[styles.publicidadStatusBadge, styles.publicidadActivaBadge]}>
+                            <Text style={styles.publicidadActivaText}>✓ Activa</Text>
+                          </View>
+                        )}
+                        {isExpired && (
+                          <View style={[styles.publicidadStatusBadge, styles.publicidadExpiradaBadge]}>
+                            <Text style={styles.publicidadExpiradaText}>⌛ Expirada</Text>
+                      </View>
+                      )}
+                      
+                        {/* Motivo de rechazo si existe */}
+                        {pub.isRechazada && pub.motivoRechazo && (
+                          <View style={styles.publicidadMotivoRechazoContainer}>
+                            <Text style={styles.publicidadMotivoRechazoLabel}>Motivo:</Text>
+                            <Text style={styles.publicidadMotivoRechazoText}>{pub.motivoRechazo}</Text>
+                          </View>
+                        )}
+
+                       
+
+                        {/* Botón de editar para publicidades rechazadas */}
+                        {pub.isRechazada && (
+                          <TouchableOpacity
+                            style={styles.publicidadEditButtonLarge}
+                            onPress={() => handleEditPublicidad(pub)}
+                          >
+                            <MaterialCommunityIcons name="pencil" size={20} color="white" />
+                            <Text style={styles.publicidadEditButtonTextLarge}>Editar</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+
+                    <View style={styles.publicidadActionsLarge}>
+                      {!pub.estado && !pub.isRechazada && (
+                        <TouchableOpacity
+                          style={styles.publicidadPayButtonLarge}
+                          onPress={() => handlePayPendingPublicidad(pub)}
+                        >
+                          <MaterialCommunityIcons name="credit-card" size={20} color="white" />
+                          <Text style={styles.publicidadPayButtonTextLarge}>Pagar</Text>
+                        </TouchableOpacity>
+                      )}
+{/* Rechazada */}
+                     
+
+                      <TouchableOpacity
+                        style={styles.publicidadDeleteButtonLarge}
+                        onPress={() => handleDeletePublicidad(pub)}
+                      >
+                        <MaterialCommunityIcons name="delete" size={20} color="white" />
+                        <Text style={styles.publicidadDeleteButtonTextLarge}>Eliminar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )
+              })}
+            </View>
+          ))
+        )}
+      </ScrollView>
+    )
+  }
+ const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+  const handleSubmitNewComercio = async () => {
+    try {
+      
+      if (
+        !newComercioData.Nombre ||
+        !newComercioData.NroDocumento ||
+        !newComercioData.Direccion ||
+        !newComercioData.Telefono ||
+        !newComercioData.Correo
+      ) {
+        Alert.alert("Error", "Por favor, complete todos los campos obligatorios.")
+        return
+      }
+  if (!validateEmail(newComercioData.Correo)) {
+        Alert.alert(
+          "Error de validación",
+          "El correo electrónico no tiene un formato válido. Debe ser del formato: ejemplo@dominio.com",
+        )
+        return
+      }
+      const cleanNroDocumento = newComercioData.NroDocumento.replace(/-/g, "")
+      const cuitValidation = validateCUIT(cleanNroDocumento)
+      if (!cuitValidation.valid) {
+        Alert.alert("Error de validación", cuitValidation.message)
+        return
+      }
+
+     if (newComercioHoraIngreso && !validateTimeFormat(newComercioHoraIngreso)) {
+        Alert.alert("Error", "El horario de apertura debe tener el formato HH:MM (ej: 18:00)")
+        return
+      }
+
+      if (newComercioHoraCierre && !validateTimeFormat(newComercioHoraCierre)) {
+        Alert.alert("Error", "El horario de cierre debe tener el formato HH:MM (ej: 02:00)")
+        return
+      }
+
+      setIsSaving(true)
+
+      
+const horaIngresoFormatted =
+        newComercioHoraIngreso && newComercioHoraIngreso.trim() !== ""
+          ? formatTimeWithSeconds(newComercioHoraIngreso)
+          : null
+      const horaCierreFormatted =
+        newComercioHoraCierre && newComercioHoraCierre.trim() !== ""
+          ? formatTimeWithSeconds(newComercioHoraCierre)
+          : null
+
+      
+      const comercioDataToSend = {
+        iD_Comercio: 0,
+        nombre: newComercioData.Nombre,
+        capacidad: Number.parseInt(newComercioData.Capacidad) || 0,
+        mesas: Number.parseInt(newComercioData.Mesas) || 0,
+        generoMusical: newComercioData.GeneroMusical,
+        tipoDocumento: newComercioData.TipoDocumento.replace(/\s+/g, ""),
+        nroDocumento: formatCUIT(newComercioData.NroDocumento),
+        direccion: newComercioData.Direccion,
+        correo: newComercioData.Correo,
+        telefono: newComercioData.Telefono,
+        estado: false, // Comercio pendiente de aprobación
+        fechaCreacion: new Date().toISOString(),
+        horaIngreso: horaIngresoFormatted,
+        horaCierre: horaCierreFormatted,
+        foto: newComercioImageBase64 || "",
+        iD_Usuario: user.iD_Usuario,
+        iD_TipoComercio: newComercioData.ID_TipoComercio,
+      }
+
+      console.log("DEBUG - Objeto completo a enviar:", {
+        ...comercioDataToSend,
+        foto: comercioDataToSend.foto ? `[Base64 string of length: ${comercioDataToSend.foto.length}]` : "No image",
+      })
+
+      const response = await Apis.crearComercio(comercioDataToSend)
+
+      if (response.status === 200 || response.status === 201) {
+        Alert.alert(
+          "Comercio Creado",
+          "Su comercio ha sido registrado exitosamente y está pendiente de aprobación por el administrador.",
+          [
+            {
+              text: "OK",
         onPress: () => {
-          Alert.alert("Funcionalidad", "Redirigir a formulario de creación de comercio")
-        },
-      },
-    ])
+          setCreateModalVisible(false)
+                loadComerciosList()
+              },
+            },
+          ],
+        )
+      } else {
+        throw new Error("Error al crear comercio")
+      }
+    } catch (error) {
+      
+      let errorMessage = "No se pudo crear el comercio."
+
+      if (error.response?.data) {
+        const errorData = error.response.data
+
+        // Error de validación de correo del backend
+        if (errorData.errors?.Correo) {
+          errorMessage = "El correo electrónico es inválido. Por favor, verifique el formato (ejemplo@dominio.com)"
+        }
+        // Error de CUIT duplicado - detectar en message o en el string de error
+        else if (
+          errorData.message?.includes("CUIT") ||
+          errorData.title?.includes("CUIT") ||
+          (typeof errorData === "string" && errorData.includes("CUIT"))
+        ) {
+          errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
+        }
+        // Otros errores de validación
+        else if (errorData.errors) {
+          const firstError = Object.values(errorData.errors)[0]
+          if (Array.isArray(firstError) && firstError.length > 0) {
+            errorMessage = firstError[0]
+          }
+        }
+        // Mensaje genérico del backend
+        else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+      }
+      // Si el error es un string directo (como "Existe comercio con el mismo CUIT")
+      else if (typeof error.message === "string" && error.message.includes("CUIT")) {
+        errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
+      }
+
+      Alert.alert(
+        "Error al registrar comercio",
+        errorMessage + "\n\nPor favor, corrija los datos y vuelva a intentar.",
+        [{ text: "Entendido" }],
+      )
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleDeleteComercio = () => {
@@ -354,11 +932,9 @@ export default function BarManagement() {
           style: "destructive",
           onPress: async () => {
             try {
-              const response = await fetch(`${API_BASE_URL}/api/comercios/${selectedComercio.iD_Comercio}`, {
-                method: "DELETE",
-              })
+              const response = await Apis.eliminarComercio(selectedComercio.iD_Comercio)
 
-              if (response.ok) {
+              if (response.status === 200 || response.status === 201 || response.status === 204) {
                 Alert.alert("Comercio eliminado", "Su comercio ha sido eliminado exitosamente.")
                 setModalVisible(false)
                 await loadComerciosList()
@@ -366,13 +942,182 @@ export default function BarManagement() {
                 throw new Error("Error al eliminar comercio")
               }
             } catch (error) {
-              console.error("Error al eliminar:", error)
               Alert.alert("Error", "No se pudo eliminar el comercio.")
             }
           },
         },
       ],
     )
+  }
+
+  // Function to load publicidades for the selected comercio
+  const loadPublicidades = async (comercioId) => {
+    try {
+      console.log("Loading publicidades for comercio:", comercioId)
+      const response = await Apis.obtenerPublicidadesListado()
+      if (response.status === 200) {
+        const allPublicidades = response.data
+        const now = new Date()
+
+        const comercioPublicidades = allPublicidades
+          .filter((pub) => pub.iD_Comercio === comercioId)
+          .map((pub) => {
+            // Calculate expiration date based on FechaCreacion + Tiempo
+            const fechaCreacion = new Date(pub.fechaCreacion || pub.FechaCreacion)
+            const dias = getDiasFromTiempo(pub.tiempo)
+            const fechaExpiracion = new Date(fechaCreacion)
+            fechaExpiracion.setDate(fechaExpiracion.getDate() + dias)
+
+            return {
+              ...pub,
+              fechaExpiracionCalculada: fechaExpiracion,
+            }
+          })
+          .filter((pub) => {
+            // Only show if not expired (or if estado is false/pending payment)
+            if (!pub.estado) return true // Show pending payments
+            return pub.fechaExpiracionCalculada > now // Hide expired paid publicidades
+          })
+
+        console.log("Publicidades loaded:", comercioPublicidades.length)
+        setPublicidadesList(comercioPublicidades)
+      }
+    } catch (error) {
+      console.error("Error al cargar publicidades:", error)
+      setPublicidadesList([])
+    }
+  }
+
+  
+  const handleEditPublicidad = (publicidad) => {
+    // Si la publicidad ya fue pagada y está rechazada, permitir editar sin pagar
+    if (publicidad.pago && !publicidad.estado && publicidad.motivoRechazo) {
+      Alert.alert(
+        "Editar Publicidad Rechazada",
+        "Esta publicidad ya fue pagada. Puedes editar la imagen sin volver a pagar.",
+        [
+          {
+            text: "Cancelar",
+            style: "cancel",
+          },
+          {
+            text: "Editar",
+            onPress: () => {
+              setSelectedPublicidad(publicidad)
+              setPublicidadModalVisible(true)
+            },
+          },
+        ],
+      )
+    } else {
+      setSelectedPublicidad(publicidad)
+      setPublicidadModalVisible(true)
+    }
+  }
+
+
+  // Function to handle publicidad delete
+  const handleDeletePublicidad = (publicidad) => {
+    Alert.alert("Eliminar Publicidad", "¿Estás seguro que deseas eliminar esta publicidad?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await Apis.eliminarPublicidad(publicidad.iD_Publicidad)
+            Alert.alert("Éxito", "La publicidad ha sido eliminada correctamente.")
+            if (selectedComercio) {
+            await loadPublicidades(selectedComercio.iD_Comercio)
+             }
+
+            // Siempre recargar todas las publicidades si estamos en el tab de publicidades
+         
+            if (activeTab === "publicidades") {
+              await loadTodasPublicidades()
+            }
+          } catch (error) {
+            console.log("Error al eliminar publicidad:", error)
+            Alert.alert("Error", "No se pudo eliminar la publicidad.")
+          }
+        },
+      },
+    ])
+  }
+
+  const handlePayPendingPublicidad = async (publicidad) => {
+    try {
+      const durations = [
+        { days: 7, label: "1 Semana", price: 3000 },
+        { days: 15, label: "15 Días", price: 5000 },
+        { days: 30, label: "1 Mes", price: 10000 },
+      ]
+
+      // Determine duration from tiempo field
+      let duration = durations[0] // default
+      const tiempo = publicidad.tiempo
+      if (tiempo.includes("15")) duration = durations[1]
+      else if (tiempo.includes("30")) duration = durations[2]
+
+      console.log("Generando link de pago para publicidad pendiente:", publicidad.iD_Publicidad)
+
+      const preferenciaResponse = await Apis.crearPreferenciaPago({
+        titulo: `Publicidad ${duration.label} - ${publicidad.nombreComercio || "Comercio"}`,
+        precio: duration.price,
+        publicidadId: publicidad.iD_Publicidad,
+      })
+
+      if (preferenciaResponse.data && preferenciaResponse.data.init_point) {
+        const checkoutUrl = preferenciaResponse.data.init_point
+        const supported = await Linking.canOpenURL(checkoutUrl)
+
+        if (supported) {
+          await Linking.openURL(checkoutUrl)
+          Alert.alert("Redirigido a Mercado Pago", "Completa el pago para activar tu publicidad.", [
+            { text: "Entendido" },
+          ])
+        } else {
+          Alert.alert("Error", "No se pudo abrir el link de pago.")
+        }
+      }
+    } catch (error) {
+      console.error("Error al generar link de pago:", error)
+      Alert.alert("Error", "No se pudo generar el link de pago. Intenta nuevamente.")
+    }
+  }
+
+  const getTiempoLabel = (tiempo) => {
+    if (!tiempo) return "Duración desconocida"
+
+    // Remove milliseconds and normalize format
+    const normalizedTiempo = tiempo.split(".")[0] // Remove .000 if present
+
+    // Map tiempo values to labels
+    if (normalizedTiempo.startsWith("7") || normalizedTiempo.startsWith("07")) {
+      return "1 Semana"
+    } else if (normalizedTiempo.startsWith("15")) {
+      return "15 Días"
+    } else if (normalizedTiempo.startsWith("30")) {
+      return "1 Mes"
+    }
+
+    return tiempo // Fallback to original value
+  }
+
+  const getDiasFromTiempo = (tiempo) => {
+    if (!tiempo) return 0
+
+    // Remove milliseconds and normalize format
+    const normalizedTiempo = tiempo.split(".")[0] // Remove .000 if present
+
+    // Extract the first number (days) from the tiempo string
+    // Format is "DD:HH:MM" or "D:HH:MM"
+    const parts = normalizedTiempo.split(":")
+    if (parts.length > 0) {
+      return Number.parseInt(parts[0]) || 0
+    }
+
+    return 0
   }
 
   const renderComercioDetails = () => {
@@ -387,7 +1132,7 @@ export default function BarManagement() {
       }
       return require("../../assets/placeholder.jpg")
     }
-
+const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
     return (
       <ScrollView style={styles.modalScrollView}>
         <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}>
@@ -400,6 +1145,16 @@ export default function BarManagement() {
             <Text numberOfLines={2} style={styles.modalTitle}>
               {selectedComercio.nombre}
             </Text>
+{isRechazado && (
+              <View style={styles.rejectionBanner}>
+                <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
+                <View style={styles.rejectionTextContainer}>
+                  <Text style={styles.rejectionTitle}>Comercio Rechazado</Text>
+                  <Text style={styles.rejectionMessage}>{selectedComercio.motivoRechazo}</Text>
+                  <Text style={styles.rejectionAction}>Puede editar los datos y volver a enviar para aprobación.</Text>
+                </View>
+              </View>
+            )}
 
             <Image
               source={getImageSource()}
@@ -411,27 +1166,34 @@ export default function BarManagement() {
               <Text style={styles.infoText}>📍 {selectedComercio.direccion}</Text>
               <Text style={styles.infoText}>👥 Capacidad: {selectedComercio.capacidad || "No especificada"}</Text>
               <Text style={styles.infoText}>
-                🕐 {formatTimeForDisplay(selectedComercio.hora_ingreso) || "No especificado"} -{" "}
-                {formatTimeForDisplay(selectedComercio.hora_cierre) || "No especificado"}
+                🕐 {formatTimeForDisplay(selectedComercio.horaIngreso) || "No especificado"} -{" "}
+                {formatTimeForDisplay(selectedComercio.horaCierre) || "No especificado"}
               </Text>
               {selectedComercio.generoMusical && <Text style={styles.hashtag}>#{selectedComercio.generoMusical}</Text>}
             </View>
-
-            {advertisingImage && (
-              <View style={styles.advertisingContainer}>
-                <Text style={styles.advertisingTitle}>Imagen de Publicidad</Text>
-                <Image source={{ uri: advertisingImage }} style={styles.advertisingImage} />
-              </View>
-            )}
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-                <MaterialCommunityIcons name="pencil" size={20} color="white" />
-                <Text style={styles.buttonText}>Editar</Text>
+ {!isRechazado && (
+            <View style={styles.advertisingSection}>
+          
+              <TouchableOpacity
+                style={styles.createPublicidadButton}
+                onPress={() => {
+                setPublicidadModalVisible(true)
+                    setSelectedPublicidad(null)
+                }}
+              >
+                <MaterialCommunityIcons name="plus" size={20} color="white" />
+                  <Text style={styles.createPublicidadButtonText}>Crear Publicidad</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteComercio}>
+            </View>
+ )}
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.editButton} onPress={() => setIsEditing(true)}>
+                <MaterialCommunityIcons name="pencil" size={20} color="white" />
+                <Text style={styles.editButtonText}>Editar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteComercio(selectedComercio)}>
                 <MaterialCommunityIcons name="delete" size={20} color="white" />
-                <Text style={styles.buttonText}>Eliminar</Text>
+                <Text style={styles.deleteButtonText}>Eliminar</Text>
               </TouchableOpacity>
             </View>
           </>
@@ -484,23 +1246,32 @@ export default function BarManagement() {
               />
 
               <Text style={styles.editLabel}>Horario de apertura</Text>
-              <TextInput
-                style={styles.editInput}
-                value={openingHours}
-                onChangeText={setOpeningHours}
-                placeholder="ej: 18:00"
-                maxLength={5}
-              />
+          <TextInput
+            style={styles.editInput}
+            value={newComercioHoraIngreso}
+            onChangeText={(text) => {
+              console.log("DEBUG - Horario de apertura cambiado a:", text)
+              setNewComercioHoraIngreso(text)
+            }}
+            placeholder="ej: 18:00"
+            maxLength={5}
+            placeholderTextColor="#a0a0a0"
+          />
+          <Text style={styles.helperText}>Formato: HH:MM (ej: 18:00 para 6 PM)</Text>
 
-              <Text style={styles.editLabel}>Horario de cierre</Text>
-              <TextInput
-                style={styles.editInput}
-                value={closingHours}
-                onChangeText={setClosingHours}
-                placeholder="ej: 02:00"
-                maxLength={5}
-              />
-
+          <Text style={styles.editLabel}>Horario de cierre</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioHoraCierre}
+            onChangeText={(text) => {
+              console.log("DEBUG - Horario de cierre cambiado a:", text)
+              setNewComercioHoraCierre(text)
+            }}
+            placeholder="ej: 02:00"
+            maxLength={5}
+            placeholderTextColor="#a0a0a0"
+          />
+          <Text style={styles.helperText}>Formato: HH:MM (ej: 02:00 para 2 AM)</Text>
               <Text style={styles.editLabel}>Imagen del negocio</Text>
               <TouchableOpacity
                 style={styles.imageButton}
@@ -509,15 +1280,6 @@ export default function BarManagement() {
                 <Text style={styles.imageButtonText}>Seleccionar imagen</Text>
               </TouchableOpacity>
               {businessImage && <Image source={{ uri: businessImage }} style={styles.previewImage} />}
-
-              <Text style={styles.editLabel}>Imagen de publicidad</Text>
-              <TouchableOpacity
-                style={styles.imageButton}
-                onPress={() => handleImagePicker(setAdvertisingImage, "advertisingImage")}
-              >
-                <Text style={styles.imageButtonText}>Seleccionar imagen de publicidad</Text>
-              </TouchableOpacity>
-              {advertisingImage && <Image source={{ uri: advertisingImage }} style={styles.previewImage} />}
             </View>
 
             <View style={styles.buttonContainer}>
@@ -536,6 +1298,174 @@ export default function BarManagement() {
             </View>
           </>
         )}
+      </ScrollView>
+    )
+  }
+
+ const renderCreateComercioForm = () => {
+    return (
+      <ScrollView style={styles.modalScrollView}>
+        <TouchableOpacity style={styles.closeButton} onPress={() => setCreateModalVisible(false)}>
+          <AntDesign name="close" size={24} color="white" />
+        </TouchableOpacity>
+
+        <Text style={styles.modalTitle}>Nuevo Comercio</Text>
+
+        <View style={styles.editSection}>
+          <Text style={styles.editLabel}>Tipo de Comercio *</Text>
+          <Picker
+            selectedValue={newComercioData.ID_TipoComercio}
+            style={styles.picker}
+            onValueChange={(itemValue) =>
+              setNewComercioData((prevState) => ({ ...prevState, ID_TipoComercio: itemValue }))
+            }
+          >
+            <Picker.Item label="Bar" value={1} />
+            <Picker.Item label="Boliche" value={2} />
+          </Picker>
+
+          <Text style={styles.editLabel}>Nombre del comercio *</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.Nombre}
+            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Nombre: text }))}
+            placeholder="Nombre del comercio"
+            placeholderTextColor="#a0a0a0"
+          />
+
+          <Text style={styles.editLabel}>Dirección *</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.Direccion}
+            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Direccion: text }))}
+            placeholder="Dirección"
+            placeholderTextColor="#a0a0a0"
+          />
+
+          <Text style={styles.editLabel}>Correo del comercio *</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.Correo}
+            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Correo: text }))}
+            placeholder="correo@ejemplo.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            placeholderTextColor="#a0a0a0"
+          />
+
+          <Text style={styles.editLabel}>CUIT *</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.NroDocumento}
+            onChangeText={(text) => {
+              const formatted = formatCUIT(text)
+              setNewComercioData((prevState) => ({ ...prevState, NroDocumento: formatted }))
+            }}
+            placeholder="20-12345678-9"
+            keyboardType="numeric"
+            maxLength={13}
+            placeholderTextColor="#a0a0a0"
+          />
+          <Text style={styles.helperText}>Formato: 20-12345678-9 (11 dígitos con guiones)</Text>
+
+          <Text style={styles.editLabel}>Teléfono del comercio *</Text>
+          <View style={styles.phoneContainer}>
+          
+            <TextInput
+              style={styles.phoneInput}
+              value={newComercioData.Telefono}
+              onChangeText={(text) => {
+                const cleaned = text.replace(/[^0-9]/g, "").slice(0, 10)
+                setNewComercioData((prevState) => ({ ...prevState, Telefono: cleaned }))
+              }}
+              placeholder="1132419131"
+              keyboardType="phone-pad"
+              maxLength={10}
+              placeholderTextColor="#a0a0a0"
+            />
+          </View>
+          <Text style={styles.helperText}>Ingrese 10 dígitos sin espacios ni guiones</Text>
+
+          <Text style={styles.editLabel}>Capacidad</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.Capacidad}
+            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Capacidad: text }))}
+            placeholder="Capacidad máxima"
+            keyboardType="numeric"
+            placeholderTextColor="#a0a0a0"
+          />
+
+          <Text style={styles.editLabel}>Número de mesas</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.Mesas}
+            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Mesas: text }))}
+            placeholder="Cantidad de mesas"
+            keyboardType="numeric"
+            placeholderTextColor="#a0a0a0"
+          />
+
+          <Text style={styles.editLabel}>Género musical</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.GeneroMusical}
+            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, GeneroMusical: text }))}
+            placeholder="Género musical"
+            placeholderTextColor="#a0a0a0"
+          />
+             <Text style={styles.editLabel}>Horario de apertura</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioHoraIngreso}
+            onChangeText={(text) => {
+              console.log("DEBUG - Horario de apertura cambiado a:", text)
+              setNewComercioHoraIngreso(text)
+            }}
+            placeholder="ej: 18:00"
+            maxLength={5}
+            placeholderTextColor="#a0a0a0"
+          />
+          <Text style={styles.helperText}>Formato: HH:MM (ej: 18:00 para 6 PM)</Text>
+
+          <Text style={styles.editLabel}>Horario de cierre</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioHoraCierre}
+            onChangeText={(text) => {
+              console.log("DEBUG - Horario de cierre cambiado a:", text)
+              setNewComercioHoraCierre(text)
+            }}
+            placeholder="ej: 02:00"
+            maxLength={5}
+            placeholderTextColor="#a0a0a0"
+          />
+          <Text style={styles.helperText}>Formato: HH:MM (ej: 02:00 para 2 AM)</Text>
+
+          <Text style={styles.editLabel}>Imagen del negocio</Text>
+          <TouchableOpacity
+            style={styles.imageButton}
+            onPress={() => handleImagePicker(setNewComercioImage, "newComercioImage")}
+          >
+            <Text style={styles.imageButtonText}>Seleccionar imagen</Text>
+          </TouchableOpacity>
+          {newComercioImage && <Image source={{ uri: newComercioImage }} style={styles.previewImage} />}
+        </View>
+
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.disabledButton]}
+            onPress={handleSubmitNewComercio}
+            disabled={isSaving}
+          >
+            <MaterialCommunityIcons name="content-save" size={20} color="white" />
+            <Text style={styles.buttonText}>{isSaving ? "Creando..." : "Crear Comercio"}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setCreateModalVisible(false)}>
+            <MaterialCommunityIcons name="close" size={20} color="white" />
+            <Text style={styles.buttonText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     )
   }
@@ -568,8 +1498,12 @@ export default function BarManagement() {
   }
 
   const approvedComercios = comerciosList.filter((comercio) => comercio.estado === true)
-  const pendingComercios = comerciosList.filter((comercio) => comercio.estado === false)
-
+  const pendingComercios = comerciosList.filter(
+    (comercio) => comercio.estado === false && (!comercio.motivoRechazo || comercio.motivoRechazo.trim() === ""),
+  )
+  const rejectedComercios = comerciosList.filter(
+    (comercio) => comercio.estado === false && comercio.motivoRechazo && comercio.motivoRechazo.trim() !== "",
+  )
   return (
     <View style={styles.container}>
       <View style={styles.headerContainer}>
@@ -580,6 +1514,52 @@ export default function BarManagement() {
         </TouchableOpacity>
       </View>
 
+        <View style={styles.tabsContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "comercios" && styles.activeTab]}
+          onPress={() => setActiveTab("comercios")}
+        >
+          <MaterialCommunityIcons name="store" size={20} color={activeTab === "comercios" ? "#D838F5" : "#666"} />
+          <Text style={[styles.tabText, activeTab === "comercios" && styles.activeTabText]}>Comercios</Text>
+        </TouchableOpacity>
+
+        
+
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "publicidades" && styles.activeTab]}
+          onPress={() => setActiveTab("publicidades")}
+        >
+          <MaterialCommunityIcons
+            name="billboard"
+            size={20}
+            color={activeTab === "publicidades" ? "#D838F5" : "#666"}
+          />
+          <Text style={[styles.tabText, activeTab === "publicidades" && styles.activeTabText]}>Publicidades</Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === "comercios" && (
+        <>
+{rejectedComercios.length > 0 && (
+        <View style={styles.rejectedSection}>
+          <Text style={styles.sectionTitle}>❌ Comercios Rechazados ({rejectedComercios.length})</Text>
+          <FlatList
+            data={rejectedComercios}
+            renderItem={({ item }) => (
+              <TouchableOpacity style={styles.rejectedCard} onPress={() => handleComercioPress(item)}>
+                <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
+                <View style={styles.rejectedCardContent}>
+                  <Text style={styles.rejectedCardName}>{item.nombre}</Text>
+                  <Text style={styles.rejectedCardStatus}>Toca para ver el motivo y editar</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            keyExtractor={(item) => item.iD_Comercio.toString()}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+          />
+        </View>
+      )}
       {pendingComercios.length > 0 && (
         <View style={styles.pendingSection}>
           <Text style={styles.sectionTitle}>⏳ Pendientes de Aprobación ({pendingComercios.length})</Text>
@@ -600,7 +1580,7 @@ export default function BarManagement() {
 
       {approvedComercios.length > 0 ? (
         <View style={styles.approvedSection}>
-          <Text style={styles.sectionTitle}>✅ Comercios Aprobados ({approvedComercios.length})</Text>
+           <Text style={styles.sectionTitle}>Comercios Aprobados</Text>
           <FlatList
             data={approvedComercios}
             renderItem={({ item }) => <ComercioCard comercio={item} onPress={handleComercioPress} />}
@@ -616,7 +1596,12 @@ export default function BarManagement() {
           <Text style={styles.emptySubtitle}>Crea tu primer comercio para comenzar</Text>
         </View>
       )}
+ </>
+      )}
 
+      
+
+      {activeTab === "publicidades" && renderPublicidadesPanel()}
       {/* Modal de detalles del comercio */}
       <Modal
         animationType="slide"
@@ -628,34 +1613,68 @@ export default function BarManagement() {
           <View style={styles.modalView}>{renderComercioDetails()}</View>
         </View>
       </Modal>
+<Modal
+        animationType="slide"
+        transparent={true}
+        visible={createModalVisible}
+        onRequestClose={() => setCreateModalVisible(false)}
+      >
+        <View style={styles.centeredView}>
+          <View style={styles.modalView}>{renderCreateComercioForm()}</View>
+        </View>
+      </Modal>
+      {/* Publicidad Modal */}
+      <PublicidadModal
+        visible={publicidadModalVisible}
+        onClose={() => {
+          setPublicidadModalVisible(false)
+          setSelectedPublicidad(null)
+          if (selectedComercio) {
+            loadPublicidades(selectedComercio.iD_Comercio) // Reload after closing
+          }
+         
+          if (activeTab === "publicidades") {
+            loadTodasPublicidades()
+          }
+        }}
+        comercio={selectedComercio}
+        publicidadToEdit={selectedPublicidad}
+      />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+ container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#1a1a2e",
   },
   headerContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     padding: 20,
-    backgroundColor: "white",
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(216, 56, 245, 0.3)",
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#5c288c",
+    color: "#ffffff",
   },
   createButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#28a745",
+    backgroundColor: "rgba(216, 56, 245, 0.8)",
     paddingHorizontal: 15,
     paddingVertical: 10,
     borderRadius: 20,
+    shadowColor: "#D838F5",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   createButtonText: {
     color: "white",
@@ -665,14 +1684,14 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#ffffff",
     marginBottom: 15,
   },
   pendingSection: {
     padding: 20,
   },
   pendingCard: {
-    backgroundColor: "#fff3cd",
+    backgroundColor: "rgba(255, 193, 7, 0.15)",
     padding: 15,
     borderRadius: 10,
     marginRight: 10,
@@ -683,11 +1702,11 @@ const styles = StyleSheet.create({
   pendingCardName: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#856404",
+    color: "#ffc107",
   },
   pendingCardStatus: {
     fontSize: 14,
-    color: "#856404",
+    color: "rgba(255, 255, 255, 0.7)",
     fontStyle: "italic",
   },
   approvedSection: {
@@ -698,11 +1717,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   cardContainer: {
-    backgroundColor: "#5c288c",
+    backgroundColor: "rgba(58, 9, 103, 0.4)",
     borderRadius: 15,
     marginBottom: 15,
     padding: 10,
     width: "48%",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+    shadowColor: "#8b5cf6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
   },
   cardImage: {
     width: "100%",
@@ -716,12 +1742,12 @@ const styles = StyleSheet.create({
   cardName: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#FFFFFF",
+    color: "#ffffff",
     marginBottom: 5,
   },
   cardAddress: {
     fontSize: 12,
-    color: "#CCCCCC",
+    color: "rgba(255, 255, 255, 0.6)",
     marginBottom: 5,
   },
   cardTypeContainer: {
@@ -730,7 +1756,7 @@ const styles = StyleSheet.create({
   cardType: {
     fontSize: 12,
     color: "#FFFFFF",
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(216, 56, 245, 0.3)",
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -748,37 +1774,35 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
+    color: "#ffffff",
     marginBottom: 10,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: "#666",
+    color: "rgba(255, 255, 255, 0.6)",
     textAlign: "center",
   },
-  // Modal styles
   centeredView: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
   },
   modalView: {
     margin: 20,
-    backgroundColor: "white",
+    backgroundColor: "rgba(26, 26, 46, 0.98)",
     borderRadius: 20,
     padding: 20,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowColor: "#8b5cf6",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 10,
     width: "90%",
     maxHeight: "85%",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
   },
   modalScrollView: {
     width: "100%",
@@ -788,13 +1812,16 @@ const styles = StyleSheet.create({
     right: 10,
     top: 10,
     zIndex: 1,
+    backgroundColor: "rgba(233, 17, 233, 0.32)",
+    borderRadius: 20,
+    padding: 5,
   },
   modalTitle: {
     fontSize: 24,
     fontWeight: "bold",
     marginBottom: 15,
     textAlign: "center",
-    color: "#5c288c",
+    color: "#ffffff",
   },
   modalImage: {
     width: "100%",
@@ -805,32 +1832,58 @@ const styles = StyleSheet.create({
   infoContainer: {
     width: "100%",
     marginBottom: 20,
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    padding: 15,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
   },
   infoText: {
     fontSize: 16,
     marginBottom: 8,
-    color: "#333",
+    color: "rgba(255, 255, 255, 0.9)",
   },
   hashtag: {
     fontSize: 16,
-    color: "#5c288c",
+    color: "#D838F5",
     fontWeight: "bold",
     marginTop: 5,
   },
-  advertisingContainer: {
+  advertisingSection: {
     width: "100%",
-    marginBottom: 20,
+    marginVertical: 20,
+    padding: 15,
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
   },
   advertisingTitle: {
     fontSize: 18,
     fontWeight: "bold",
+    color: "#D838F5",
     marginBottom: 10,
-    color: "#5c288c",
   },
-  advertisingImage: {
-    width: "100%",
-    height: 150,
-    borderRadius: 10,
+  advertisingButton: {
+    flexDirection: "row",
+    backgroundColor: "rgba(58, 9, 103, 0.6)",
+    padding: 15,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
+    shadowColor: "#D838F5",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 58,
+    elevation: 20,
+  },
+  advertisingButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginLeft: 10,
   },
   buttonContainer: {
     flexDirection: "row",
@@ -841,38 +1894,46 @@ const styles = StyleSheet.create({
   editButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#007bff",
+    backgroundColor: "rgba(58, 9, 103, 0.6)",
     padding: 12,
     borderRadius: 20,
     minWidth: 100,
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
   },
   deleteButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#dc3545",
+    backgroundColor: "rgba(220, 53, 69, 0.8)",
     padding: 12,
     borderRadius: 20,
     minWidth: 100,
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(220, 53, 69, 0.4)",
   },
   saveButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#28a745",
+    backgroundColor: "rgba(216, 56, 245, 0.8)",
     padding: 12,
     borderRadius: 20,
     minWidth: 100,
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
   },
   cancelButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#6c757d",
+    backgroundColor: "rgba(108, 117, 125, 0.8)",
     padding: 12,
     borderRadius: 20,
     minWidth: 100,
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(108, 117, 125, 0.4)",
   },
   buttonText: {
     color: "white",
@@ -882,7 +1943,6 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.6,
   },
-  // Edit form styles
   editSection: {
     width: "100%",
     marginBottom: 20,
@@ -890,29 +1950,32 @@ const styles = StyleSheet.create({
   editLabel: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#333",
+    color: "#ffffff",
     marginBottom: 5,
     marginTop: 10,
   },
   editInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: "rgba(216, 56, 245, 0.3)",
     padding: 12,
     borderRadius: 8,
-    backgroundColor: "#f9f9f9",
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
     fontSize: 16,
     marginBottom: 10,
+    color: "#ffffff",
   },
   imageButton: {
-    backgroundColor: "#e0e0e0",
+    backgroundColor: "rgba(58, 9, 103, 0.4)",
     padding: 15,
     borderRadius: 8,
     alignItems: "center",
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
   },
   imageButtonText: {
     fontSize: 16,
-    color: "#333",
+    color: "#ffffff",
   },
   previewImage: {
     width: "100%",
@@ -924,31 +1987,584 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#1a1a2e",
   },
   loadingText: {
     fontSize: 18,
-    color: "#5c288c",
+    color: "#D838F5",
     marginTop: 10,
   },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#1a1a2e",
     padding: 20,
   },
   errorText: {
     fontSize: 20,
-    color: "#d32f2f",
+    color: "#ff6b6b",
     textAlign: "center",
     marginBottom: 10,
     fontWeight: "bold",
   },
   errorSubText: {
     fontSize: 16,
-    color: "#666",
+    color: "rgba(255, 255, 255, 0.6)",
     textAlign: "center",
     lineHeight: 22,
   },
+  // New styles for publicidades list
+  publicidadesListContainer: {
+    marginBottom: 15,
+  },
+  publicidadesListTitle: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#D838F5",
+    marginBottom: 10,
+  },
+ publicidadCard: {
+    flexDirection: "column",
+    backgroundColor: "rgba(58, 9, 103, 0.4)",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+  },
+  publicidadImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 8,
+    marginBottom: 10,
+     backgroundColor: "rgba(0, 0, 0, 0.2)",
+  },
+  publicidadInfo: {
+    marginBottom: 8,
+  },
+  publicidadTiempo: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#ffffff",
+    marginBottom: 4,
+  },
+  publicidadViews: {
+    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.6)",
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  publicidadExpiracion: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.5)",
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  publicidadActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  publicidadEditButton: {
+    backgroundColor: "rgba(58, 9, 103, 0.6)",
+    padding: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
+    minWidth: 44,
+    alignItems: "center",
+  },
+  publicidadDeleteButton: {
+    backgroundColor: "rgba(220, 53, 69, 0.8)",
+    padding: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(220, 53, 69, 0.4)",
+    minWidth: 44,
+    alignItems: "center",
+  },
+  publicidadPendiente: {
+    fontSize: 12,
+    color: "#ffc107",
+    fontWeight: "bold",
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  publicidadPayButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(216, 56, 245, 0.8)",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
+    shadowColor: "#D838F5",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+ payPublicidadButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginLeft: 6,
+  },
+  picker: {
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+    borderRadius: 8,
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    color: "#ffffff",
+    marginBottom: 10,
+  },
+  phoneContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  areaCodePicker: {
+    width: 150,
+    height: 50,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+    borderRadius: 8,
+    marginRight: 10,
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    color: "#ffffff",
+  },
+  phoneInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    color: "#ffffff",
+  },
+  helperText: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.5)",
+    marginBottom: 10,
+    fontStyle: "italic",
+  },
+  publicidadEditButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  publicidadDeleteButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  publicidadesScrollView: {
+  maxHeight: 400,
+},
+rejectionBanner: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 107, 107, 0.15)",
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 15,
+    borderLeftWidth: 4,
+    borderLeftColor: "#ff6b6b",
+    alignItems: "flex-start",
+  },
+  rejectionTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  rejectionTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#ff6b6b",
+    marginBottom: 5,
+  },
+  rejectionMessage: {
+    fontSize: 14,
+    color: "rgba(255, 255, 255, 0.9)",
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  rejectionAction: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.7)",
+    fontStyle: "italic",
+  },
+
+  rejectedSection: {
+    padding: 20,
+    backgroundColor: "rgba(255, 107, 107, 0.05)",
+  },
+  rejectedCard: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 107, 107, 0.15)",
+    padding: 15,
+    borderRadius: 10,
+    marginRight: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: "#ff6b6b",
+    minWidth: 200,
+    alignItems: "center",
+  },
+  rejectedCardContent: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  rejectedCardName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#ff6b6b",
+  },
+  rejectedCardStatus: {
+    fontSize: 12,
+    color: "rgba(255, 255, 255, 0.7)",
+    fontStyle: "italic",
+    marginTop: 2,
+  },
+  publicidadDeleteButton: {
+    backgroundColor: "rgba(220, 53, 69, 0.8)",
+    padding: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(220, 53, 69, 0.4)",
+    flexDirection: "row",
+    gap: 6,
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  publicidadButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+   tabsContainer: {
+    flexDirection: "row",
+    backgroundColor: "rgba(58, 9, 103, 0.3)",
+    borderRadius: 12,
+    padding: 4,
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  activeTab: {
+    backgroundColor: "rgba(216, 56, 245, 0.2)",
+  },
+  tabText: {
+    fontSize: 13,
+    color: "#666",
+    fontWeight: "500",
+  },
+  activeTabText: {
+    color: "#D838F5",
+    fontWeight: "700",
+  },
+
+  publicidadesPanel: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  panelTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#D838F5",
+    marginBottom: 20,
+  },
+  comercioPublicidadesGroup: {
+    marginBottom: 30,
+  },
+  comercioGroupTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#fff",
+    marginBottom: 12,
+    paddingLeft: 4,
+  },
+  publicidadCardLarge: {
+    backgroundColor: "rgba(58, 9, 103, 0.4)",
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+  },
+  publicidadRechazada: {
+    borderColor: "rgba(255, 107, 107, 0.5)",
+    borderWidth: 2,
+  },
+  publicidadRejectionBanner: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 107, 107, 0.15)",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: "#ff6b6b",
+    gap: 10,
+  },
+  publicidadRejectionTextContainer: {
+    flex: 1,
+  },
+  publicidadRejectionTitle: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#ff6b6b",
+    marginBottom: 4,
+  },
+  publicidadRejectionMessage: {
+    fontSize: 13,
+    color: "#ffcccc",
+    lineHeight: 18,
+  },
+  publicidadCardContent: {
+    flexDirection: "row",
+    gap: 15,
+  },
+  publicidadImageLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+  },
+  publicidadInfoLarge: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  publicidadTiempoLarge: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#D838F5",
+  },
+  publicidadViewsLarge: {
+    fontSize: 14,
+    color: "#ccc",
+  },
+  publicidadExpiracionLarge: {
+    fontSize: 13,
+    color: "#999",
+  },
+  publicidadStatusBadge: {
+    backgroundColor: "rgba(255, 193, 7, 0.2)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignSelf: "flex-start",
+  },
+  publicidadActivaBadge: {
+    backgroundColor: "rgba(76, 175, 80, 0.2)",
+  },
+  publicidadPendienteText: {
+    fontSize: 12,
+    color: "#ffc107",
+    fontWeight: "600",
+  },
+  publicidadActivaText: {
+    fontSize: 12,
+    color: "#4caf50",
+    fontWeight: "600",
+  },
+  publicidadActionsLarge: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 15,
+  },
+  publicidadPayButtonLarge: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#4caf50",
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  publicidadPayButtonTextLarge: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  publicidadEditButtonLarge: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(58, 9, 103, 0.8)",
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
+  },
+  publicidadEditButtonTextLarge: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  publicidadDeleteButtonLarge: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(220, 53, 69, 0.8)",
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  publicidadDeleteButtonTextLarge: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: "#666",
+    marginTop: 15,
+  },
+  approvedBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 2,
+    zIndex: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  // Agregando estilos para el botón de crear publicidad en el modal
+  createPublicidadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(216, 56, 245, 0.8)",
+    paddingVertical: 15,
+    borderRadius: 12,
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.4)",
+  },
+  createPublicidadButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginLeft: 10,
+  },
+  // Agregando estilos para las acciones del modal (botones de editar/eliminar)
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    width: "100%",
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  editButtonText: {
+    color: "white",
+    marginLeft: 5,
+    fontWeight: "bold",
+  },
+  deleteButtonText: {
+    color: "white",
+    marginLeft: 5,
+    fontWeight: "bold",
+  },
+   pagoBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(76, 175, 80, 0.9)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 1,
+  },
+  pagoBadgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  pendientePagoBadge: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(255, 152, 0, 0.9)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 1,
+  },
+  pendientePagoBadgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  payPublicidadButton: {
+    backgroundColor: "#4CAF50",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  payPublicidadButtonText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  publicidadPendienteAprobacionBadge: {
+  backgroundColor: "rgba(33, 150, 243, 0.2)",
+},
+publicidadRechazadaBadge: {
+  backgroundColor: "rgba(244, 67, 54, 0.2)",
+},
+publicidadExpiradaBadge: {
+  backgroundColor: "rgba(158, 158, 158, 0.2)",
+},
+publicidadPendienteAprobacionText: {
+  fontSize: 12,
+  color: "#2196f3",
+  fontWeight: "600",
+},
+publicidadRechazadaText: {
+  fontSize: 12,
+  color: "#f44336",
+  fontWeight: "600",
+},
+publicidadExpiradaText: {
+  fontSize: 12,
+  color: "#9e9e9e",
+  fontWeight: "600",
+},
 })
+export default BarManagement

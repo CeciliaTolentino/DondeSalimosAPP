@@ -1,6 +1,9 @@
-import { createContext, useState, useCallback } from "react"
+
+import { createContext, useState, useCallback, useEffect } from "react"
 import { GoogleSignin } from "./firebase"
 import { Alert } from "react-native"
+import { getRoleIdByDescription, getRoleDescriptionById, ROLE_DESCRIPTIONS } from "./utils/roleHelper"
+import { clearJwtToken, storeJwtToken, getJwtToken } from "./Apis"
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL
 export const AuthContext = createContext()
@@ -11,20 +14,59 @@ export const AuthProvider = ({ children }) => {
     isAdmin: false,
     isBarOwner: false,
     isApproved: false,
-    isLoading: false,
+    isLoading: true,
     isAuthenticated: false,
     isRegistered: false,
     googleIdToken: null,
-    googleUserData: null, // Guardar datos de Google por separado
+    googleUserData: null,
   })
+useEffect(() => {
+    const checkInitialAuth = async () => {
+      try {
+        console.log("Verificando autenticación inicial...")
+        const token = await getJwtToken()
 
-  const updateAuth = useCallback((userData, isRegistered = false) => {
+        if (token) {
+          console.log("Token encontrado en AsyncStorage al iniciar")
+          // Aquí podrías validar el token con el backend si quieres
+          // Por ahora, simplemente lo limpiamos si no hay usuario en el estado
+          console.log("Limpiando token antiguo...")
+          await clearJwtToken()
+          console.log("Token limpiado exitosamente")
+        } else {
+          console.log("No hay token guardado al iniciar")
+        }
+      } catch (error) {
+        console.error("Error verificando autenticación inicial:", error)
+      } finally {
+        setAuthState((prev) => ({ ...prev, isLoading: false }))
+      }
+    }
+
+    checkInitialAuth()
+  }, [])
+  const updateAuth = useCallback(async (userData, isRegistered = false) => {
     console.log("Actualizando estado de autenticación:", { userData, isRegistered })
+
+    let isAdmin = false
+    let isBarOwner = false
+
+    if (userData?.iD_RolUsuario) {
+      try {
+        const roleDescription = await getRoleDescriptionById(userData.iD_RolUsuario)
+        isAdmin = roleDescription === ROLE_DESCRIPTIONS.ADMINISTRADOR
+        isBarOwner = roleDescription === ROLE_DESCRIPTIONS.USUARIO_COMERCIO
+        console.log(`Rol del usuario: ${roleDescription} (ID: ${userData.iD_RolUsuario})`)
+      } catch (error) {
+        console.error("Error al determinar rol del usuario:", error)
+      }
+    }
+
     setAuthState((prevState) => ({
       ...prevState,
       user: userData,
-      isAdmin: userData?.iD_RolUsuario === 2,
-      isBarOwner: userData?.iD_RolUsuario === 3,
+      isAdmin,
+      isBarOwner,
       isApproved: userData?.estado,
       isLoading: false,
       isAuthenticated: !!userData,
@@ -47,16 +89,13 @@ export const AuthProvider = ({ children }) => {
     })
   }, [])
 
-  // Función para formatear fecha en formato ISO correcto
   const formatISODate = (date) => {
     if (!date) return new Date().toISOString()
 
-    // Si ya es una fecha válida, convertirla
     const dateObj = new Date(date)
     return dateObj.toISOString()
   }
 
-  // Método que maneja tanto respuestas exitosas como el caso de usuario no registrado
   const iniciarSesionConGoogle = useCallback(async (idToken) => {
     try {
       console.log("Validando usuario con Google usando el nuevo endpoint")
@@ -74,6 +113,11 @@ export const AuthProvider = ({ children }) => {
       console.log("Respuesta del endpoint iniciarSesionConGoogle:", result)
 
       if (response.ok) {
+        if (result.jwtToken) {
+          await storeJwtToken(result.jwtToken)
+          setAuthState((prev) => ({ ...prev, jwtToken: result.jwtToken }))
+          console.log("JWT token obtenido del login y guardado")
+        }
         return result.usuario
       } else if (response.status === 400 && result.existeUsuario === false) {
         console.log("Usuario no registrado:", result.mensaje)
@@ -97,35 +141,63 @@ export const AuthProvider = ({ children }) => {
       throw error
     }
   }, [])
+const refreshGoogleToken = useCallback(async () => {
+    try {
+      console.log("Refrescando token de Google...")
+      const tokens = await GoogleSignin.getTokens()
 
-  // Nueva API para autenticación con Google después del registro
+      if (tokens.idToken) {
+        console.log("Nuevo token de Google obtenido exitosamente")
+        setAuthState((prev) => ({
+          ...prev,
+          googleIdToken: tokens.idToken,
+        }))
+        return tokens.idToken
+      } else {
+        throw new Error("No se pudo obtener un nuevo token de Google")
+      }
+    } catch (error) {
+      console.error("Error al refrescar token de Google:", error)
+      throw error
+    }
+  }, [])
   const autenticacionConGoogle = useCallback(
-    async (rolUsuario) => {
+    async (roleDescription) => {
       try {
-        if (!authState.googleIdToken) {
-          throw new Error("No hay token de Google disponible")
-        }
+        console.log("Refrescando token antes de autenticar...")
+        const freshToken = await refreshGoogleToken()
 
-        console.log("Registrando en la base y en firebase con rol:", rolUsuario)
-        const response = await fetch(`${API_BASE_URL}/api/usuarios/registrarseConGoogle`, {
+        const rolUsuario = await getRoleIdByDescription(roleDescription)
+        console.log(`Autenticando con rol: ${roleDescription} (ID: ${rolUsuario})`)
+const requestBody = {
+          idToken: freshToken, // Usando el token fresco en lugar del guardado
+          rolUsuario: rolUsuario,
+        }
+        console.log(" Request body para registrarseConGoogle:", JSON.stringify(requestBody, null, 2))
+        console.log(" URL de la API:", `${API_BASE_URL}/api/Usuarios/registrarseConGoogle`)
+
+        const response = await fetch(`${API_BASE_URL}/api/Usuarios/registrarseConGoogle`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            idToken: authState.googleIdToken,
-            rolUsuario: rolUsuario
-          }),
+           body: JSON.stringify(requestBody),
         })
+
+        console.log(" Response status:", response.status)
+        console.log(" Response ok:", response.ok)
+     //   console.log(" Response headers:", JSON.stringify([...response.headers.entries()]))
 
         if (response.ok) {
           const result = await response.json()
-          console.log("Usuario registrado exitosamente:", result)
-
-          // CORREGIR: Combinar datos del servidor con datos de Google
+          console.log("Usuario autenticado exitosamente:", result)
+        if (result.jwtToken) {
+             await storeJwtToken(result.jwtToken)
+            setAuthState((prev) => ({ ...prev, jwtToken: result.jwtToken }))
+            console.log("JWT token obtenido del registro y guardado")
+          }
           const combinedUserData = {
             ...result.usuario,
-            // Preservar datos de Google
             displayName: authState.googleUserData?.displayName,
             photo: authState.googleUserData?.photo,
             givenName: authState.googleUserData?.givenName,
@@ -133,18 +205,40 @@ export const AuthProvider = ({ children }) => {
           }
 
           console.log("Datos combinados del usuario:", combinedUserData)
-          updateAuth(combinedUserData, true)
+          await updateAuth(combinedUserData, true)
           return { success: true, usuario: combinedUserData }
         } else {
-          const errorText = await response.text()
-          throw new Error(`Error en autenticación: ${errorText}`)
+         // const errorText = await response.text()
+         // throw new Error(`Error en autenticación: ${errorText}`)
+         let errorText = ""
+          let errorJson = null
+
+          try {
+            errorText = await response.text()
+            console.log("Response error text:", errorText)
+
+            if (errorText) {
+              try {
+                errorJson = JSON.parse(errorText)
+                console.log("Response error JSON:", errorJson)
+              } catch (e) {
+                console.log("Error text is not JSON")
+              }
+            }
+          } catch (e) {
+            console.error("Error reading response text:", e)
+          }
+
+          const errorMessage = errorJson?.mensaje || errorJson?.message || errorText || "Error desconocido"
+          throw new Error(`Error en autenticación (${response.status}): ${errorMessage}`)
         }
       } catch (error) {
         console.error("Error en autenticacionConGoogle:", error)
+         console.error("Error stack:", error.stack)
         throw error
       }
     },
-    [authState.googleIdToken, authState.googleUserData, updateAuth],
+    [authState.googleUserData, updateAuth, refreshGoogleToken], // Agregando refreshGoogleToken a las dependencias,
   )
 
   const loginWithGoogle = useCallback(async () => {
@@ -157,13 +251,12 @@ export const AuthProvider = ({ children }) => {
 
       const userInfo = await GoogleSignin.signIn()
 
-      console.log("Información de usuario de Google obtenida: " +userInfo.idToken)
+      console.log("Información de usuario de Google obtenida")
 
       if (!userInfo.idToken) {
         throw new Error("No se pudo obtener el idToken de Google Sign-In")
       }
 
-      // Guardar el token y datos de Google para reutilizar
       const googleUserData = {
         email: userInfo.user.email,
         displayName: userInfo.user.name,
@@ -184,7 +277,6 @@ export const AuthProvider = ({ children }) => {
       if (registeredUser) {
         console.log("Usuario registrado, actualizando estado de autenticación")
 
-        // Combinar datos del servidor con datos de Google
         const combinedUserData = {
           ...registeredUser,
           displayName: googleUserData.displayName,
@@ -193,14 +285,28 @@ export const AuthProvider = ({ children }) => {
           familyName: googleUserData.familyName,
         }
 
-        updateAuth(combinedUserData, true)
+        await updateAuth(combinedUserData, true)
         return { success: true, user: combinedUserData, isRegistered: true }
       } else {
         console.log("Usuario no registrado")
-        updateAuth(googleUserData, false)
+        await updateAuth(googleUserData, false)
         return { success: true, user: googleUserData, isRegistered: false }
       }
     } catch (error) {
+      const errorMessage = error?.message || error?.toString() || ""
+      const isCancelled =
+        errorMessage.includes("cancelled") ||
+        errorMessage.includes("canceled") ||
+        errorMessage.includes("Sign in action cancelled")
+
+      if (isCancelled) {
+        console.log("Usuario canceló el inicio de sesión con Google")
+        // No mostrar error, solo limpiar el estado
+        clearAuth()
+        return { success: false, cancelled: true }
+      }
+
+      // Para otros errores, sí mostrar el error
       console.error("Error durante el inicio de sesión con Google:", error)
       clearAuth()
       throw error
@@ -209,7 +315,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [iniciarSesionConGoogle, updateAuth, clearAuth])
 
-  // Buscar usuario por ID
   const buscarUsuarioPorId = useCallback(async (userId) => {
     try {
       console.log("Buscando usuario por ID:", userId)
@@ -234,13 +339,11 @@ export const AuthProvider = ({ children }) => {
     }
   }, [])
 
-  // Actualizar usuario (solo nombreUsuario y teléfono)
   const actualizarUsuario = useCallback(
     async (userId, userData) => {
       try {
         console.log("Actualizando usuario:", userId, userData)
 
-        // Formatear la fecha correctamente
         const dataToSend = {
           ...userData,
           fechaCreacion: formatISODate(userData.fechaCreacion),
@@ -259,7 +362,6 @@ export const AuthProvider = ({ children }) => {
         console.log("Status de respuesta:", response.status)
 
         if (response.ok) {
-          // Verificar si hay contenido en la respuesta
           const responseText = await response.text()
           console.log("Respuesta raw:", responseText)
 
@@ -278,7 +380,6 @@ export const AuthProvider = ({ children }) => {
 
           console.log("Usuario actualizado exitosamente:", updatedUser)
 
-          // Preservar datos de Google al actualizar
           const combinedUserData = {
             ...updatedUser,
             displayName: authState.googleUserData?.displayName,
@@ -287,7 +388,7 @@ export const AuthProvider = ({ children }) => {
             familyName: authState.googleUserData?.familyName,
           }
 
-          updateAuth(combinedUserData, true)
+          await updateAuth(combinedUserData, true)
           return combinedUserData
         } else {
           const errorText = await response.text()
@@ -301,7 +402,6 @@ export const AuthProvider = ({ children }) => {
     [updateAuth, authState.googleUserData],
   )
 
-  // Eliminar usuario
   const eliminarUsuario = useCallback(
     async (userId) => {
       try {
@@ -329,54 +429,6 @@ export const AuthProvider = ({ children }) => {
     [clearAuth],
   )
 
-  const registerComercio = useCallback(async (comercioData) => {
-    try {
-      console.log("Registrando comercio:", comercioData)
-
-      // Formatear la fecha correctamente
-      const dataToSend = {
-        ...comercioData,
-        fechaCreacion: formatISODate(comercioData.fechaCreacion),
-      }
-
-      console.log("Datos de comercio con fecha formateada:", dataToSend)
-
-      const response = await fetch(`${API_BASE_URL}/api/comercios/crear`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(dataToSend),
-      })
-
-      console.log("Status de respuesta del comercio:", response.status)
-
-      if (response.ok) {
-        // CORREGIR: Manejar respuesta que puede ser texto plano o JSON
-        const responseText = await response.text()
-        console.log("Respuesta raw del comercio:", responseText)
-
-        let result
-        try {
-          // Intentar parsear como JSON
-          result = JSON.parse(responseText)
-          console.log("Comercio registrado exitosamente (JSON):", result)
-        } catch (parseError) {
-          // Si no es JSON, usar el texto como mensaje de éxito
-          console.log("Comercio registrado exitosamente (texto):", responseText)
-          result = { mensaje: responseText, success: true }
-        }
-
-        return result
-      } else {
-        const errorText = await response.text()
-        throw new Error(`Error al registrar comercio: ${errorText}`)
-      }
-    } catch (error) {
-      console.error("Error registering comercio:", error)
-      throw error
-    }
-  }, [])
 
   const logout = useCallback(async () => {
     try {
@@ -400,7 +452,7 @@ export const AuthProvider = ({ children }) => {
         buscarUsuarioPorId,
         actualizarUsuario,
         eliminarUsuario,
-        registerComercio,
+        
       }}
     >
       {children}

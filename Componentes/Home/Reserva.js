@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useContext } from "react"
 import {
   View,
@@ -8,51 +9,90 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
+   Modal,
+  TextInput,
 } from "react-native"
 import { AuthContext } from "../../AuthContext"
+import Apis from "../../Apis"
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL
-
-export default function Reserva() {
+export default function Reservas() {
   const { user, isAuthenticated, isBarOwner } = useContext(AuthContext)
   const [reservas, setReservas] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [comercioInfo, setComercioInfo] = useState(null)
+  const [comerciosList, setComerciosList] = useState([])
+  const [selectedComercio, setSelectedComercio] = useState(null)
+const [showRejectionModal, setShowRejectionModal] = useState(false)
+  const [rejectionReason, setRejectionReason] = useState("")
+  const [reservaToReject, setReservaToReject] = useState(null)
 
   useEffect(() => {
-    if (isAuthenticated && user && isBarOwner) {
-      loadComercioAndReservas()
+    if (isAuthenticated && user) {
+      if (isBarOwner) {
+        loadComerciosAndReservas()
+      } else {
+        loadUserReservas()
+      }
     } else {
       setIsLoading(false)
     }
   }, [isAuthenticated, user, isBarOwner])
 
-  const loadComercioAndReservas = async () => {
+  const filterFutureReservas = (reservasList) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    return reservasList.filter((reserva) => {
+      const reservaDate = new Date(reserva.fechaReserva)
+      reservaDate.setHours(0, 0, 0, 0)
+      return reservaDate >= today
+    })
+  }
+
+  const loadUserReservas = async () => {
     try {
-      // Primero obtener información del comercio
-      const comerciosResponse = await fetch(`${API_BASE_URL}/api/comercios/listado`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
+      const response = await Apis.obtenerReservasListado()
 
-      if (comerciosResponse.ok) {
-        const comercios = await comerciosResponse.json()
-        const userComercio = comercios.find((comercio) => comercio.iD_Usuario === user.iD_Usuario)
+      if (response.status === 200 && response.data) {
+        const allReservas = response.data
+        const userReservas = allReservas.filter((r) => r.iD_Usuario == user.iD_Usuario)
 
-        if (userComercio && userComercio.estado) {
-          setComercioInfo(userComercio)
-          await loadReservas(userComercio.nombre)
+        const futureReservas = filterFutureReservas(userReservas)
+        setReservas(futureReservas)
+      } else {
+        setReservas([])
+      }
+    } catch (error) {
+      console.error("❌ Error al cargar reservas del usuario:", error)
+      setReservas([])
+    } finally {
+      setIsLoading(false)
+      setRefreshing(false)
+    }
+  }
+
+  const loadComerciosAndReservas = async () => {
+    try {
+      const comerciosResponse = await Apis.obtenerComerciosListado()
+
+      if (comerciosResponse.status === 200 && comerciosResponse.data) {
+        const comercios = comerciosResponse.data
+        const userComercios = comercios.filter((comercio) => comercio.iD_Usuario === user.iD_Usuario && comercio.estado)
+
+        if (userComercios.length > 0) {
+          setComerciosList(userComercios)
+          setSelectedComercio(userComercios[0])
+          await loadReservas(userComercios[0].nombre)
         } else {
-          setComercioInfo(null)
+          setComerciosList([])
+          setSelectedComercio(null)
           setReservas([])
         }
       }
     } catch (error) {
-      console.error("Error al cargar comercio:", error)
-      Alert.alert("Error", "No se pudo cargar la información del comercio.")
+      console.error("Error al cargar comercios:", error)
+      Alert.alert("Error", "No se pudo cargar la información de los comercios.")
     } finally {
       setIsLoading(false)
       setRefreshing(false)
@@ -61,24 +101,13 @@ export default function Reserva() {
 
   const loadReservas = async (nombreComercio) => {
     try {
-      console.log("Cargando reservas para comercio:", nombreComercio)
+      const response = await Apis.obtenerReservasPorComercio(nombreComercio)
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/reservas/buscarNombreComercio/${encodeURIComponent(nombreComercio)}`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-      )
-
-      if (response.ok) {
-        const reservasData = await response.json()
-        console.log("Reservas cargadas:", reservasData)
-        setReservas(reservasData)
+      if (response.status === 200 && response.data) {
+        const futureReservas = filterFutureReservas(response.data)
+        const activeReservas = futureReservas.filter((reserva) => !(reserva.estado === false && reserva.motivoRechazo))
+        setReservas(activeReservas)
       } else {
-        console.log("No se encontraron reservas o error en la respuesta")
         setReservas([])
       }
     } catch (error) {
@@ -86,27 +115,47 @@ export default function Reserva() {
       setReservas([])
     }
   }
+const handleUserDeleteReserva = (reservaId) => {
+    Alert.alert("Eliminar Reserva", "¿Estás seguro de que deseas eliminar esta reserva?", [
+      {
+        text: "Cancelar",
+        style: "cancel",
+      },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const response = await Apis.eliminarReserva(reservaId)
+
+            if (response.status === 204 || response.status === 200) {
+              setReservas((prevReservas) => prevReservas.filter((r) => r.iD_Reserva !== reservaId))
+              Alert.alert("Éxito", "Reserva eliminada correctamente.")
+            } else {
+              throw new Error("Error al eliminar reserva")
+            }
+          } catch (error) {
+            console.error("Error al eliminar reserva:", error)
+            Alert.alert("Error", "No se pudo eliminar la reserva.")
+          }
+        },
+      },
+    ])
+  }
+  const handleSelectComercio = async (comercio) => {
+    setSelectedComercio(comercio)
+    setIsLoading(true)
+    await loadReservas(comercio.nombre)
+    setIsLoading(false)
+  }
 
   const handleReservaAction = async (reserva, aprobar) => {
     try {
-      const updatedReserva = {
-        ...reserva,
-        estado: aprobar, // true para aprobar, false para rechazar
-      }
+      const response = await Apis.actualizarEstadoReserva(reserva, aprobar)
 
-      console.log("Actualizando reserva:", updatedReserva)
-
-      const response = await fetch(`${API_BASE_URL}/api/reservas/actualizar/${reserva.iD_Reserva}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(updatedReserva),
-      })
-
-      if (response.ok) {
+      if (response.status === 204) {
         Alert.alert("Éxito", `Reserva ${aprobar ? "aprobada" : "rechazada"} correctamente.`)
-        await loadReservas(comercioInfo.nombre) // Recargar reservas
+        await loadReservas(selectedComercio.nombre)
       } else {
         throw new Error("Error al actualizar reserva")
       }
@@ -116,40 +165,128 @@ export default function Reserva() {
     }
   }
 
+const handleDeleteReserva = async (reserva) => {
+    console.log(" Opening rejection modal for reserva:", reserva.iD_Reserva)
+    setReservaToReject(reserva)
+    setRejectionReason("")
+    setShowRejectionModal(true)
+  }
+
+  const processRejection = async () => {
+    console.log(" Processing rejection with reason:", rejectionReason)
+
+    if (!rejectionReason || rejectionReason.trim() === "") {
+      Alert.alert("Error", "Debes ingresar un motivo de rechazo.")
+      return
+    }
+
+    try {
+      const response = await Apis.actualizarEstadoReserva(reservaToReject, false, rejectionReason.trim())
+
+      console.log(" Rejection response status:", response.status)
+
+      if (response.status === 204 || response.status === 200) {
+        setReservas((prevReservas) => prevReservas.filter((r) => r.iD_Reserva !== reservaToReject.iD_Reserva))
+        setShowRejectionModal(false)
+        setRejectionReason("")
+        setReservaToReject(null)
+        Alert.alert("Éxito", "Reserva rechazada correctamente.")
+        //await loadReservas(selectedComercio.nombre)
+      } else {
+        throw new Error("Error al rechazar reserva")
+      }
+    } catch (error) {
+      console.error(" Error al rechazar reserva:", error)
+      Alert.alert("Error", "No se pudo rechazar la reserva.")
+    }
+  }
   const onRefresh = () => {
     setRefreshing(true)
-    loadComercioAndReservas()
+    if (isBarOwner) {
+      loadComerciosAndReservas()
+    } else {
+      loadUserReservas()
+    }
   }
 
   const formatDate = (dateString) => {
     const date = new Date(dateString)
-    return date.toLocaleDateString("es-ES", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+    const day = String(date.getDate()).padStart(2, "0")
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const year = String(date.getFullYear()).slice(-2)
+    return `${day}/${month}/${year}`
   }
 
-  const getStatusColor = (estado) => {
-    if (estado === true) return "#28a745" // Verde para aprobado
-    if (estado === false) return "#dc3545" // Rojo para rechazado
-    return "#ffc107" // Amarillo para pendiente
+ const getStatusColor = (estado, motivoRechazo) => {
+    if (estado === true) return "#d1fae5"
+    if (estado === false && motivoRechazo) return "#fecaca" // Rechazada (rojo suave)
+    if (estado === false) return "#ede9fe" // Pendiente
+    return "#ede9fe"
   }
-
-  const getStatusText = (estado) => {
+   const getStatusText = (estado, motivoRechazo) => {
     if (estado === true) return "Aprobada"
-    if (estado === false) return "Rechazada"
-    return "Pendiente"
+    if (estado === false && motivoRechazo) return "Rechazada"
+    if (estado === false) return "Pendiente de aprobación"
+    return "Pendiente de aprobación"
   }
+
+  const getStatusTextColor = (estado, motivoRechazo) => {
+    if (estado === true) return "#059669"
+    if (estado === false && motivoRechazo) return "#dc2626" // Rechazada (rojo)
+    if (estado === false) return "#7c3aed" // Pendiente (morado)
+    return "#7c3aed"
+  }
+
+  const renderUserReservaItem = ({ item }) => (
+    <View style={styles.reservaItem}>
+      <View style={styles.reservaHeader}>
+        <Text style={styles.clientName}>{item.comercio?.nombre || "Comercio"}</Text>
+         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.estado, item.motivoRechazo) }]}>
+          <Text style={[styles.statusText, { color: getStatusTextColor(item.estado, item.motivoRechazo) }]}>
+            {getStatusText(item.estado, item.motivoRechazo)}
+             </Text>
+        </View>
+      </View>
+
+      <Text style={styles.reservaDetail}>
+        <Text style={styles.label}>Fecha:</Text> {formatDate(item.fechaReserva)}
+      </Text>
+      <Text style={styles.reservaDetail}>
+        <Text style={styles.label}>Comensales:</Text> {item.comenzales}
+      </Text>
+      {item.comercio?.direccion && (
+        <Text style={styles.reservaDetail}>
+          <Text style={styles.label}>Dirección:</Text> {item.comercio.direccion}
+        </Text>
+      )}
+      {item.comercio?.telefono && (
+        <Text style={styles.reservaDetail}>
+          <Text style={styles.label}>Teléfono:</Text> {item.comercio.telefono}
+        </Text>
+      )}
+     
+      {item.motivoRechazo && item.motivoRechazo.trim() !== "" && (
+        <View style={styles.rejectionReasonContainer}>
+          <Text style={styles.rejectionReasonLabel}>Motivo de rechazo:</Text>
+          <Text style={styles.rejectionReasonText}>{item.motivoRechazo}</Text>
+        </View>
+      )}
+       <TouchableOpacity style={styles.deleteButton} onPress={() => handleUserDeleteReserva(item.iD_Reserva)}>
+        <Text style={styles.deleteButtonIcon}>🗑️</Text>
+        <Text style={styles.deleteButtonText}>Eliminar Reserva</Text>
+      </TouchableOpacity>
+    </View>
+  )
+    
 
   const renderReservaItem = ({ item }) => (
     <View style={styles.reservaItem}>
       <View style={styles.reservaHeader}>
         <Text style={styles.clientName}>{item.usuario?.nombreUsuario || "Cliente"}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.estado) }]}>
-          <Text style={styles.statusText}>{getStatusText(item.estado)}</Text>
+       <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.estado, item.motivoRechazo) }]}>
+          <Text style={[styles.statusText, { color: getStatusTextColor(item.estado, item.motivoRechazo) }]}>
+            {getStatusText(item.estado, item.motivoRechazo)}
+          </Text>
         </View>
       </View>
 
@@ -165,13 +302,8 @@ export default function Reserva() {
       <Text style={styles.reservaDetail}>
         <Text style={styles.label}>Teléfono:</Text> {item.usuario?.telefono || "No especificado"}
       </Text>
-      {item.tiempoTolerancia && (
-        <Text style={styles.reservaDetail}>
-          <Text style={styles.label}>Tolerancia:</Text> {item.tiempoTolerancia}
-        </Text>
-      )}
 
-      {item.estado === null && (
+       {item.estado === false && !item.motivoRechazo && (
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={[styles.actionButton, styles.approveButton]}
@@ -181,7 +313,7 @@ export default function Reserva() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, styles.rejectButton]}
-            onPress={() => handleReservaAction(item, false)}
+            onPress={() => handleDeleteReserva(item)}
           >
             <Text style={styles.actionButtonText}>Rechazar</Text>
           </TouchableOpacity>
@@ -190,7 +322,6 @@ export default function Reserva() {
     </View>
   )
 
-  // Verificaciones de acceso
   if (!isAuthenticated) {
     return (
       <View style={styles.errorContainer}>
@@ -199,57 +330,164 @@ export default function Reserva() {
     )
   }
 
-  if (!isBarOwner || user.iD_RolUsuario !== 3) {
-    return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>No tiene permisos para acceder a esta sección.</Text>
-        <Text style={styles.errorSubText}>Solo los dueños de bares pueden ver las reservas.</Text>
-      </View>
-    )
-  }
-
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#7f00b2" />
+        <ActivityIndicator size="large" color="#8b5cf6" />
         <Text style={styles.loadingText}>Cargando reservas...</Text>
       </View>
     )
   }
 
-  if (!comercioInfo) {
+  if (isBarOwner) {
+    if (comerciosList.length === 0) {
+      return (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>No tienes comercios aprobados</Text>
+          <Text style={styles.errorSubText}>Debes tener al menos un comercio aprobado para ver las reservas.</Text>
+        </View>
+      )
+    }
+
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Comercio no encontrado o no aprobado</Text>
-        <Text style={styles.errorSubText}>Debe tener un comercio aprobado para ver las reservas.</Text>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Mis Reservas</Text>
+          <Text style={styles.subtitle}>Gestiona las reservas de tus comercios</Text>
+        </View>
+
+        {comerciosList.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.comerciosSelector}
+            contentContainerStyle={styles.comerciosSelectorContent}
+          >
+            {comerciosList.map((comercio) => (
+              <TouchableOpacity
+                key={comercio.iD_Comercio}
+                style={[
+                  styles.comercioTab,
+                  selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabActive,
+                ]}
+                onPress={() => handleSelectComercio(comercio)}
+              >
+                <Text
+                  style={[
+                    styles.comercioTabText,
+                    selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabTextActive,
+                  ]}
+                   numberOfLines={1}
+                >
+                  {comercio.nombre}
+                </Text>
+                <Text
+                  style={[
+                    styles.comercioTabType,
+                    selectedComercio?.iD_Comercio === comercio.iD_Comercio && styles.comercioTabTypeActive,
+                  ]}
+                >
+                  {comercio.tipoComercio?.nombre || "Comercio"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        
+
+       ) : (
+          <View style={styles.singleComercioHeader}>
+            <Text style={styles.singleComercioName}>{selectedComercio?.nombre}</Text>
+            <Text style={styles.singleComercioType}>{selectedComercio?.tipoComercio?.nombre || "Comercio"}</Text>
+          </View>
+        )}
+
+
+        {reservas.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <View style={styles.emptyIconContainer}>
+              <Text style={styles.emptyIcon}>📋</Text>
+            </View>
+            <Text style={styles.emptyTitle}>Sin reservas pendientes</Text>
+            <Text style={styles.emptySubtitle}>
+             Cuando tus clientes realicen reservas en {selectedComercio?.nombre}, aparecerán aquí para que puedas
+              gestionarlas.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={reservas}
+            renderItem={renderReservaItem}
+            keyExtractor={(item) => item.iD_Reserva.toString()}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            contentContainerStyle={styles.listContainer}
+          />
+        )}
+        <Modal
+          visible={showRejectionModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowRejectionModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Rechazar Reserva</Text>
+              <Text style={styles.modalSubtitle}>Ingresa el motivo del rechazo que verá el cliente:</Text>
+
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ej: No hay disponibilidad para esa fecha"
+                placeholderTextColor="#999"
+                value={rejectionReason}
+                onChangeText={setRejectionReason}
+                multiline
+                numberOfLines={4}
+                maxLength={200}
+                autoFocus
+              />
+
+              <Text style={styles.characterCount}>{rejectionReason.length}/200 caracteres</Text>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => {
+                    setShowRejectionModal(false)
+                    setRejectionReason("")
+                    setReservaToReject(null)
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.modalButton, styles.confirmRejectButton]} onPress={processRejection}>
+                  <Text style={styles.confirmButtonText}>Rechazar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     )
   }
 
-  const pendingReservas = reservas.filter((r) => r.estado === null)
-  const approvedReservas = reservas.filter((r) => r.estado === true)
-  const rejectedReservas = reservas.filter((r) => r.estado === false)
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Reservas - {comercioInfo.nombre}</Text>
-        <Text style={styles.subtitle}>
-          Total: {reservas.length} | Pendientes: {pendingReservas.length} | Aprobadas: {approvedReservas.length} |
-          Rechazadas: {rejectedReservas.length}
-        </Text>
+        <Text style={styles.title}>Mis Reservas</Text>
       </View>
 
       {reservas.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>📅</Text>
-          <Text style={styles.emptyTitle}>No hay reservas</Text>
-          <Text style={styles.emptySubtitle}>Las reservas de los clientes aparecerán aquí cuando las realicen.</Text>
+          <Text style={styles.emptyTitle}>No tienes reservas</Text>
+          <Text style={styles.emptySubtitle}>
+            Busca un bar o club en el mapa y haz tu primera reserva desde el botón "Hacer Reserva".
+          </Text>
         </View>
       ) : (
         <FlatList
           data={reservas}
-          renderItem={renderReservaItem}
+          renderItem={renderUserReservaItem}
           keyExtractor={(item) => item.iD_Reserva.toString()}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={styles.listContainer}
@@ -262,36 +500,108 @@ export default function Reserva() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#1a1a2e",
   },
   header: {
-    backgroundColor: "white",
+    backgroundColor: "rgba(42, 42, 62, 0.8)",
     padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomWidth: 2,
+    borderBottomColor: "rgba(216, 56, 245, 0.5)",
+    shadowColor: "#D838F5",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#7f00b2",
+    color: "#e0e0e0",
     marginBottom: 5,
   },
   subtitle: {
     fontSize: 14,
-    color: "#666",
+    color: "#b0b0b0",
+  },
+  comerciosSelector: {
+    backgroundColor: "rgba(42, 42, 62, 0.5)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(216, 56, 245, 0.3)",
+  },
+  comerciosSelectorContent: {
+    padding: 15,
+    gap: 10,
+  },
+  comercioTab: {
+   paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "rgba(42, 42, 62, 0.8)",
+    borderWidth: 2,
+    borderColor: "rgba(216, 56, 245, 0.2)",
+    marginRight: 10,
+    minWidth: 160,
+    alignItems: "center",
+  },
+  comercioTabActive: {
+    backgroundColor: "rgba(216, 56, 245, 0.15)",
+    borderColor: "#D838F5",
+  },
+  comercioTabText: {
+   fontSize: 18,
+    fontWeight: "700",
+    color: "#e0e0e0",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  comercioTabTextActive: {
+    color: "#D838F5",
+  },
+  comercioTabType: {
+   fontSize: 13,
+    color: "#999",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontWeight: "600",
+  },
+  comercioTabTypeActive: {
+    color: "rgba(216, 56, 245, 0.8)",
+  },
+  singleComercioHeader: {
+    backgroundColor: "rgba(216, 56, 245, 0.1)",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(216, 56, 245, 0.3)",
+    alignItems: "center",
+  },
+  singleComercioName: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#D838F5",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  singleComercioType: {
+    fontSize: 14,
+    color: "#b0b0b0",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    fontWeight: "600",
   },
   listContainer: {
     padding: 15,
   },
   reservaItem: {
-    backgroundColor: "white",
+    backgroundColor: "rgba(42, 42, 62, 0.5)",
     padding: 15,
     marginBottom: 10,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(58, 9, 103, 0.3)",
+    shadowColor: "#3a0967",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
     elevation: 5,
   },
   reservaHeader: {
@@ -303,27 +613,26 @@ const styles = StyleSheet.create({
   clientName: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#e0e0e0",
     flex: 1,
   },
   statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   statusText: {
-    color: "white",
     fontSize: 12,
-    fontWeight: "bold",
+    fontWeight: "600",
   },
   reservaDetail: {
     fontSize: 14,
-    color: "#666",
+    color: "#b0b0b0",
     marginBottom: 5,
   },
   label: {
     fontWeight: "bold",
-    color: "#333",
+    color: "#D838F5",
   },
   actionButtons: {
     flexDirection: "row",
@@ -332,29 +641,33 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    padding: 10,
-    borderRadius: 8,
+    padding: 12,
+    borderRadius: 10,
     alignItems: "center",
+    borderWidth: 1,
   },
   approveButton: {
-    backgroundColor: "#28a745",
+    backgroundColor: "rgba(5, 150, 105, 0.8)",
+    borderColor: "rgba(5, 150, 105, 0.5)",
   },
   rejectButton: {
-    backgroundColor: "#dc3545",
+    backgroundColor: "rgba(220, 38, 38, 0.8)",
+    borderColor: "rgba(220, 38, 38, 0.5)",
   },
   actionButtonText: {
     color: "white",
     fontSize: 14,
-    fontWeight: "bold",
+    fontWeight: "600",
   },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#1a1a2e",
   },
   loadingText: {
     fontSize: 16,
-    color: "#7f00b2",
+    color: "#D838F5",
     marginTop: 10,
   },
   errorContainer: {
@@ -362,17 +675,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
+    backgroundColor: "#1a1a2e",
   },
   errorText: {
     fontSize: 20,
-    color: "#d32f2f",
+    color: "#D838F5",
     textAlign: "center",
     marginBottom: 10,
     fontWeight: "bold",
   },
   errorSubText: {
     fontSize: 16,
-    color: "#666",
+    color: "#b0b0b0",
     textAlign: "center",
     lineHeight: 22,
   },
@@ -382,20 +696,141 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 40,
   },
-  emptyText: {
-    fontSize: 60,
-    marginBottom: 20,
+ emptyIconContainer: {
+    backgroundColor: "rgba(216, 56, 245, 0.1)",
+    borderRadius: 50,
+    width: 100,
+    height: 100,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+  },
+  emptyIcon: {
+    fontSize: 50,
   },
   emptyTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "bold",
-    color: "#333",
-    marginBottom: 10,
+    color: "#e0e0e0",
+    marginBottom: 12,
+    textAlign: "center",
   },
   emptySubtitle: {
-    fontSize: 16,
-    color: "#666",
+    fontSize: 15,
+    color: "#999",
     textAlign: "center",
     lineHeight: 22,
+    maxWidth: 320,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: "#2a2a3e",
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxWidth: 400,
+    borderWidth: 2,
+    borderColor: "rgba(216, 56, 245, 0.3)",
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#e0e0e0",
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#b0b0b0",
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  textInput: {
+    backgroundColor: "rgba(42, 42, 62, 0.8)",
+    borderWidth: 1,
+    borderColor: "rgba(216, 56, 245, 0.5)",
+    borderRadius: 12,
+    padding: 12,
+    color: "#e0e0e0",
+    fontSize: 16,
+    minHeight: 100,
+    textAlignVertical: "top",
+    marginBottom: 8,
+  },
+  characterCount: {
+    fontSize: 12,
+    color: "#999",
+    textAlign: "right",
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  cancelButton: {
+    backgroundColor: "rgba(42, 42, 62, 0.8)",
+    borderColor: "rgba(216, 56, 245, 0.5)",
+  },
+  cancelButtonText: {
+    color: "#e0e0e0",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  confirmRejectButton: {
+    backgroundColor: "rgba(220, 38, 38, 0.8)",
+    borderColor: "rgba(220, 38, 38, 0.5)",
+  },
+  confirmButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  rejectionReasonLabel: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#ef4444",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  rejectionReasonText: {
+    fontSize: 14,
+    color: "#fecaca",
+    lineHeight: 20,
+  },
+  deleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(220, 38, 38, 0.8)",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(220, 38, 38, 0.5)",
+    gap: 8,
+  },
+  deleteButtonIcon: {
+    fontSize: 18,
+  },
+  deleteButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
   },
 })

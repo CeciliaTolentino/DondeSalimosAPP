@@ -1,5 +1,7 @@
+
 import { useState, useContext, useEffect, useCallback } from "react"
 import { AuthContext } from "../../AuthContext"
+import { ROLE_DESCRIPTIONS } from "../../utils/roleHelper"
 import {
   View,
   StyleSheet,
@@ -15,7 +17,8 @@ import {
 } from "react-native"
 import { Picker } from "@react-native-picker/picker"
 import { useNavigation } from "@react-navigation/native"
-
+import { validateCUIT, formatCUIT } from "../../utils/cuitValidador"
+import Apis from "../../Apis"
 export default function Login() {
   const navigation = useNavigation()
   const {
@@ -26,11 +29,12 @@ export default function Login() {
     loginWithGoogle,
     autenticacionConGoogle,
     logout,
-    registerComercio,
+    
   } = useContext(AuthContext)
 
   const [showRegistrationForm, setShowRegistrationForm] = useState(false)
   const [isBarOwner, setIsBarOwner] = useState(false)
+  const [areaCode, setAreaCode] = useState("+54")
   const [comercioData, setComercioData] = useState({
     ID_TipoComercio: 1,
     Nombre: "",
@@ -40,19 +44,13 @@ export default function Login() {
     TipoDocumento: "CUIT",
     NroDocumento: "",
     Direccion: "",
+    Correo: "",
     Telefono: "",
   })
-
-  // Prellenar el correo cuando el usuario esté disponible
-  useEffect(() => {
-    if (user && user.email) {
-      setComercioData((prev) => ({
-        ...prev,
-        Correo: user.email,
-      }))
-    }
-  }, [user])
-
+ const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
   useEffect(() => {
     console.log("Estado de autenticación actualizado en Login:", { isAuthenticated, isRegistered, user })
     if (isAuthenticated && !isRegistered) {
@@ -69,7 +67,10 @@ export default function Login() {
       console.log("Iniciando autenticación con Google")
       const result = await loginWithGoogle()
       console.log("Resultado de autenticación:", result)
-
+  if (result?.cancelled) {
+        console.log("Autenticación cancelada por el usuario")
+        return
+      }
       if (result.success && !result.isRegistered) {
         console.log("Usuario autenticado pero no registrado, mostrando formulario de registro")
         setShowRegistrationForm(true)
@@ -79,83 +80,128 @@ export default function Login() {
       }
     } catch (error) {
       console.error("Error durante la autenticación con Google:", error)
-      Alert.alert("Error de autenticación", "No se pudo autenticar con Google. Por favor, intente de nuevo.")
+       Alert.alert(
+        "Error de autenticación",
+        "Hubo un problema al conectar con Google. Por favor, verifica tu conexión e intenta nuevamente.",
+      )
     }
   }
 
   const handleRegistration = useCallback(async () => {
     try {
-      // Determinar el rol basado en la selección del usuario
-      const rolUsuario = isBarOwner ? 3 : 1
+      
+        if (isBarOwner) {
+          if (
+            !comercioData.Nombre ||
+            !comercioData.NroDocumento ||
+            !comercioData.Direccion ||
+            !comercioData.Telefono ||
+            !comercioData.Correo
+          ) {
+            Alert.alert("Error", "Por favor, complete todos los campos obligatorios del comercio.")
+            return
+          }
+        
+           if (!validateEmail(comercioData.Correo)) {
+          Alert.alert("Email inválido", "Por favor, ingrese un email válido con el formato: ejemplo@dominio.com")
+          return
+        }
 
-      console.log("Enviando autenticación con Google con rol:", rolUsuario)
+          const cuitValidation = validateCUIT(comercioData.NroDocumento)
+          if (!cuitValidation.valid) {
+            Alert.alert("Error de validación", cuitValidation.message)
+            return
+          }
 
-      // Usar la nueva API autenticacionConGoogle
-      const result = await autenticacionConGoogle(rolUsuario)
+          if (comercioData.Telefono.length < 10) {
+            Alert.alert("Error", "El número de teléfono debe tener 10 dígitos.")
+            return
+          }
+}
+
+      const roleDescription = isBarOwner ? ROLE_DESCRIPTIONS.USUARIO_COMERCIO : ROLE_DESCRIPTIONS.USUARIO
+
+      console.log("Enviando autenticación con Google con rol:", roleDescription)
+
+      const result = await autenticacionConGoogle(roleDescription)
       console.log("Resultado completo de autenticacionConGoogle:", result)
 
       if (result.success) {
         if (isBarOwner) {
-          // Validar que tenemos todos los datos necesarios del comercio
-          if (!comercioData.Nombre || !comercioData.NroDocumento || !comercioData.Direccion || !comercioData.Telefono) {
-            Alert.alert("Error", "Por favor, complete todos los campos obligatorios del comercio.")
-            return
-          }
-
-          // Si es dueño de bar, registrar el comercio
+         
           const comercioDataToSend = {
             iD_Comercio: 0,
             nombre: comercioData.Nombre,
             capacidad: Number.parseInt(comercioData.Capacidad) || 0,
             mesas: Number.parseInt(comercioData.Mesas) || 0,
             generoMusical: comercioData.GeneroMusical,
-            tipoDocumento: comercioData.TipoDocumento,
-            nroDocumento: comercioData.NroDocumento,
+            tipoDocumento: comercioData.TipoDocumento.trim(),
+            nroDocumento: formatCUIT(comercioData.NroDocumento),
             direccion: comercioData.Direccion,
-            correo: user.email, // Usar el email de Google
+            correo: comercioData.Correo,
             telefono: comercioData.Telefono,
             estado: false,
             fechaCreacion: new Date().toISOString(),
-            iD_Usuario: result.usuario.iD_Usuario, // CORREGIR: usar result.usuario
+            iD_Usuario: result.usuario.iD_Usuario,
             iD_TipoComercio: comercioData.ID_TipoComercio,
           }
 
-          console.log("=== DATOS DEL COMERCIO A ENVIAR ===")
-          console.log("Nombre del comercio:", comercioDataToSend.nombre)
-          console.log("Tipo de comercio:", comercioDataToSend.iD_TipoComercio)
-          console.log("Capacidad:", comercioDataToSend.capacidad)
-          console.log("Mesas:", comercioDataToSend.mesas)
-          console.log("Género musical:", comercioDataToSend.generoMusical)
-          console.log("CUIT:", comercioDataToSend.nroDocumento)
-          console.log("Dirección:", comercioDataToSend.direccion)
-          console.log("Correo:", comercioDataToSend.correo)
-          console.log("Teléfono:", comercioDataToSend.telefono)
-          console.log("ID Usuario:", comercioDataToSend.iD_Usuario)
-          console.log("Estado:", comercioDataToSend.estado)
-          console.log("=== FIN DATOS COMERCIO ===")
-
           try {
-            await registerComercio(comercioDataToSend)
-            console.log("✅ Comercio registrado exitosamente")
+            const comercioResponse = await Apis.crearComercio(comercioDataToSend)
+            console.log("✅ Comercio registrado exitosamente:", comercioResponse.data)
 
-            // CORREGIR: Mostrar el alert DESPUÉS del registro exitoso
             Alert.alert(
-              "Registro pendiente de aprobación",
-              "Su solicitud ha sido enviada al administrador para su aprobación. Recibirá una notificación cuando sea aprobada.",
+               "Registro exitoso",
+              "Su comercio ha sido registrado y está pendiente de aprobación por el administrador. Puede ver el estado en la sección 'Bar Management'.",
               [
                 {
                   text: "OK",
-                  onPress: async () => {
-                    console.log("Usuario confirmó mensaje de aprobación")
-                    await logout()
+                  
+                   onPress: () => {
+                    console.log("Usuario confirmó mensaje de registro exitoso")
                     setShowRegistrationForm(false)
+                    navigation.navigate("Profile")
                   },
                 },
               ],
             )
           } catch (comercioError) {
-            console.error("Error al registrar comercio:", comercioError)
-            Alert.alert("Error", "No se pudo registrar el comercio. Por favor, intente de nuevo.")
+            console.log("Error al registrar comercio:", comercioError)
+             let errorMessage = "No se pudo registrar el comercio. Por favor, intente de nuevo."
+
+            let errorTitle = "Error al registrar comercio"
+
+            // Detectar error de CUIT duplicado
+            const errorData = comercioError.response?.data
+            const errorText = JSON.stringify(errorData).toLowerCase()
+
+            if (errorText.includes("cuit") || errorText.includes("nrodocumento")) {
+              errorTitle = "Usuario creado - Comercio pendiente"
+              errorMessage =
+                "Su usuario ha sido creado exitosamente, pero no se pudo registrar el comercio porque el CUIT ingresado ya está en uso por otro comercio.\n\nPor favor, verifique el número de CUIT e intente crear el comercio nuevamente desde la sección 'Bar Management'."
+            } else if (errorData?.errors?.Correo) {
+                
+              "El correo ingresado es inválido. Por favor, verifique el formato (ejemplo@dominio.com) e intente nuevamente."
+            } else if (errorData?.errors) {
+              const errorMessages = Object.values(errorData.errors).flat()
+                errorMessage = errorMessages.join("\n")
+             } else if (errorData?.message) {
+              errorMessage = errorData.message
+            }
+
+            Alert.alert(errorTitle, errorMessage, [
+              {
+                text: "OK",
+                onPress: () => {
+                  // Si el error es de CUIT duplicado, navegar a Profile para que pueda acceder a Bar Management
+                  if (errorText.includes("cuit") || errorText.includes("nrodocumento")) {
+                    setShowRegistrationForm(false)
+                    navigation.navigate("Profile")
+                  }
+                  // Si es otro error, mantener el formulario abierto para corrección
+                },
+              },
+            ])
           }
         } else {
           Alert.alert("Registro exitoso", "Sus datos han sido registrados correctamente.")
@@ -163,10 +209,10 @@ export default function Login() {
         }
       }
     } catch (error) {
-      console.error("Error al registrar:", error)
+      console.log("Error al registrar:", error)
       Alert.alert("Error", "No se pudo completar el registro. Por favor, intente de nuevo.")
     }
-  }, [isBarOwner, comercioData, autenticacionConGoogle, registerComercio, logout, navigation, user])
+  }, [isBarOwner, comercioData, areaCode, autenticacionConGoogle,   navigation])
 
   if (isLoading) {
     return (
@@ -180,14 +226,18 @@ export default function Login() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <Image source={require("../../img/login.png")} style={styles.logo} />
-        <View style={styles.tarjeta}>
+        <View style={[styles.tarjeta, showRegistrationForm && styles.tarjetaExpanded]}>
           {!isAuthenticated || (isAuthenticated && !isRegistered) ? (
             !showRegistrationForm ? (
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity style={styles.cajaBoton} onPress={handleGoogleAuth}>
-                  <Text style={styles.Textoboton}>Iniciar sesión / Registrarse con Google</Text>
+             
+                <TouchableOpacity style={styles.cajaBoton1} onPress={handleGoogleAuth}>
+                  <Image
+                  source={require("../../img/gmail.png")}
+                  style={styles.googleLogo}
+                />
+                  <Text style={styles.Textoboton}>Continuar con Google</Text>
                 </TouchableOpacity>
-              </View>
+              
             ) : (
               <View style={styles.registrationForm}>
                 <Text style={styles.formTitle}>Complete su registro</Text>
@@ -198,7 +248,7 @@ export default function Login() {
                   </Text>
                 </View>
                 <View style={styles.switchContainer}>
-                  <Text>¿Es dueño de un bar/boliche?</Text>
+                  <Text style={styles.Texto}>¿Es dueño de un bar/boliche?</Text>
                   <Switch
                     value={isBarOwner}
                     onValueChange={(value) => {
@@ -211,6 +261,7 @@ export default function Login() {
                     <TextInput
                       style={styles.input}
                       placeholder="Nombre del comercio *"
+                      placeholderTextColor="#b0b0b0"
                       value={comercioData.Nombre}
                       onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Nombre: text }))}
                     />
@@ -227,6 +278,7 @@ export default function Login() {
                     <TextInput
                       style={styles.input}
                       placeholder="Capacidad"
+                      placeholderTextColor="#b0b0b0"
                       value={comercioData.Capacidad}
                       onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Capacidad: text }))}
                       keyboardType="numeric"
@@ -234,6 +286,7 @@ export default function Login() {
                     <TextInput
                       style={styles.input}
                       placeholder="Número de mesas"
+                      placeholderTextColor="#b0b0b0"
                       value={comercioData.Mesas}
                       onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Mesas: text }))}
                       keyboardType="numeric"
@@ -241,40 +294,59 @@ export default function Login() {
                     <TextInput
                       style={styles.input}
                       placeholder="Género musical"
+                      placeholderTextColor="#b0b0b0"
                       value={comercioData.GeneroMusical}
                       onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, GeneroMusical: text }))}
                     />
-                    <TextInput
+                     <TextInput
                       style={styles.input}
-                      placeholder="CUIT *"
-                      value={comercioData.NroDocumento}
-                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, NroDocumento: text }))}
-                      keyboardType="numeric"
-                    />
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Dirección *"
+                      placeholder="Dirección del comercio *"
+                      placeholderTextColor="#b0b0b0"
                       value={comercioData.Direccion}
                       onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Direccion: text }))}
                     />
-                    {/* Campo de correo deshabilitado y prellenado */}
                     <TextInput
-                      style={[styles.input, styles.disabledInput]}
-                      placeholder="Correo electrónico"
-                      value={user?.email || ""}
-                      editable={false}
+                      style={styles.input}
+                      placeholder="Correo del comercio *"
+                      placeholderTextColor="#b0b0b0"
+                      value={comercioData.Correo}
+                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Correo: text }))}
                       keyboardType="email-address"
+                      autoCapitalize="none"
                     />
                     <TextInput
                       style={styles.input}
-                      placeholder="Teléfono *"
-                      value={comercioData.Telefono}
-                      onChangeText={(text) => setComercioData((prevState) => ({ ...prevState, Telefono: text }))}
-                      keyboardType="phone-pad"
+                      placeholder="CUIT"
+                      placeholderTextColor="#b0b0b0"
+                      value={comercioData.NroDocumento}
+                      onChangeText={(text) => {
+                        const formatted = formatCUIT(text)
+                        setComercioData((prevState) => ({ ...prevState, NroDocumento: formatted }))
+                      }}
+                      keyboardType="numeric"
+                      maxLength={13}
                     />
+                    <Text style={styles.helperText}>Formato: 20-12345678-9 (11 dígitos con guiones)</Text>
+                    <Text style={styles.label}>Teléfono del comercio *</Text>
+                    <View style={styles.phoneContainer}>
+                     
+                      <TextInput
+                        style={styles.input}
+                        placeholder="1132419131 (10 dígitos)"
+                        placeholderTextColor="#b0b0b0"
+                        value={comercioData.Telefono}
+                        onChangeText={(text) => {
+                          const cleaned = text.replace(/[^0-9]/g, "").slice(0, 10)
+                          setComercioData((prevState) => ({ ...prevState, Telefono: cleaned }))
+                        }}
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                      />
+                    </View>
+                    <Text style={styles.helperText}>Ingrese 10 dígitos sin espacios ni guiones</Text>
                   </>
                 )}
-                <TouchableOpacity style={styles.cajaBoton} onPress={handleRegistration}>
+                <TouchableOpacity style={styles.cajaBoton1} onPress={handleRegistration}>
                   <Text style={styles.Textoboton}>Completar registro</Text>
                 </TouchableOpacity>
               </View>
@@ -283,15 +355,8 @@ export default function Login() {
             <View style={styles.userInfo}>
               <Text style={styles.welcomeText}>Hola, {user?.nombreUsuario || user?.displayName || "Usuario"}!</Text>
               <Text style={styles.userTypeText}>Email: {user?.correo || user?.email}</Text>
-              <Text style={styles.userTypeText}>
-                Tipo de usuario:{" "}
-                {user?.iD_RolUsuario === 3
-                  ? "Dueño de bar"
-                  : user?.iD_RolUsuario === 2
-                    ? "Administrador"
-                    : "Usuario común"}
-              </Text>
-              {user?.iD_RolUsuario === 3 && !user?.estado && (
+              <Text style={styles.userTypeText}>Tipo de usuario: {user?.roleDescription || "Cargando..."}</Text>
+              {user?.isBarOwner && !user?.estado && (
                 <Text style={styles.pendingApprovalText}>
                   Su cuenta está pendiente de aprobación por el administrador.
                 </Text>
@@ -310,7 +375,7 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#1a1a2e", // Azul oscuro profundo
   },
   contentContainer: {
     flexGrow: 1,
@@ -322,100 +387,185 @@ const styles = StyleSheet.create({
     width: 150,
     height: 150,
     marginBottom: 20,
+    borderRadius: 75,
+    borderWidth: 3,
+    borderColor: "rgba(167, 139, 250, 0.6)", // Violeta suave bien
+    backgroundColor: "rgba(255, 255, 255, 0.95)", // Fondo blanco semi-transparente para que el icono se vea bien
   },
   tarjeta: {
-    backgroundColor: "white",
-    borderRadius: 10,
-    padding: 20,
+    backgroundColor: "rgba(42, 42, 62, 0.5)", // Gris oscuro con transparencia
+    borderRadius: 20,
+    padding: 24,
     width: "100%",
     maxWidth: 400,
-    shadowColor: "#000",
+    borderWidth: 1,
+    borderColor: "rgba(139, 92, 246, 0.2)", // Borde violeta sutil
+    shadowColor: "#8b5cf6",//luz de atras de la tarjeta
+   shadowOffset: {
+      width: 0,
+     height: 8,
+    },
+    shadowOpacity: 10.2,
+    shadowRadius: 20,
+    elevation: 100,
+  },
+   tarjetaExpanded: {
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 200, // Mayor elevación para el formulario de registro
+  },
+ cajaBoton1:{
+  backgroundColor: "rgba(151, 60, 236, 0.23)", // este es el feo
+    padding: 15,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(130, 10, 241, 0.3)", // Borde fuscia sutil visto y no es
+   shadowColor: "#db32f1ff", // visto y no es
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 8,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  buttonContainer: {
-    marginTop: 20,
-  },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 106},
   cajaBoton: {
-    backgroundColor: "#007bff",
+  backgroundColor: "rgba(151, 60, 236, 0.23)", // este es el feo
     padding: 15,
-    borderRadius: 5,
+    borderRadius: 12,
     alignItems: "center",
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(130, 10, 241, 0.3)", // Borde fuscia sutil visto y no es
+   shadowColor: "#db32f1ff", // visto y no es
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 106,
   },
   Textoboton: {
-    color: "white",
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: "bold",
+  //  fontWeight: "bold",
   },
   registrationForm: {
     marginTop: 20,
   },
   formTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
+    fontSize: 20,
+   // fontWeight: "bold",
     marginBottom: 15,
     textAlign: "center",
+    color: "#b4a0ff", // Violeta claro
   },
   input: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    padding: 10,
-    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: "rgba(139, 92, 246, 0.3)", // Borde más transparente
+    padding: 12,
+    borderRadius: 10,
     marginBottom: 10,
-  },
-  disabledInput: {
-    backgroundColor: "#f5f5f5",
-    color: "#666",
+    fontSize: 15,
+    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
+    color: "#e8e8e8", // Texto claro
   },
   switchContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 15,
+    padding: 12,
+    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(139, 92, 246, 0.2)", // Borde más transparente
   },
   picker: {
     marginBottom: 15,
+    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
+    borderRadius: 10,
+    color: "#e8e8e8", // Texto claro
   },
   userInfo: {
     alignItems: "center",
   },
   welcomeText: {
     fontSize: 18,
-    fontWeight: "bold",
+    //: "bold",
     marginBottom: 10,
+    color: "#b4a0ff", // Violeta claro
   },
   userTypeText: {
     fontSize: 16,
     marginBottom: 5,
+    color: "#e8e8e8", // Texto claro
   },
+  Texto:{color: "#e8e8e8"},
   pendingApprovalText: {
-    color: "orange",
+    color: "#f9a8d4", // Fuscia suave
     fontStyle: "italic",
     marginBottom: 10,
+    fontWeight: "600",
   },
   welcomeMessage: {
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
     padding: 15,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 20,
     borderLeftWidth: 4,
-    borderLeftColor: "#007bff",
+    borderLeftColor: "rgba(236, 72, 153, 0.7)", // Fuscia brillante
   },
   welcomeTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#007bff",
+   // fontWeight: "bold",
+    color: "#f9a8d4", // Fuscia suave
     marginBottom: 5,
   },
-  welcomeText: {
+  label: {
     fontSize: 14,
-    color: "#6c757d",
-    lineHeight: 20,
+   // fontWeight: "bold",
+    marginBottom: 5,
+    marginTop: 10,
+    color: "#b4a0ff", // Violeta claro
+  },
+  phoneContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  googleLogo: {
+    width: 24,
+    height: 24,
+    marginRight: 12,
+  },
+  areaCodePicker: {
+    width: 150,
+    height: 50,
+    borderWidth: 2,
+    borderColor: "rgba(139, 92, 246, 0.3)", // Borde más transparente
+    borderRadius: 10,
+    marginRight: 10,
+    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
+    color: "#e8e8e8", // Texto claro
+  },
+  phoneInput: {
+    flex: 1,
+    borderWidth: 2,
+    borderColor: "rgba(139, 92, 246, 0.3)", // Borde más transparente
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
+    color: "#e8e8e8", // Texto claro
+  },
+  helperText: {
+    fontSize: 12,
+    color: "#b0b0b0", // Texto más claro
+    marginBottom: 10,
+    fontStyle: "italic",
   },
 })
