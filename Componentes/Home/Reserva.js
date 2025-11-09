@@ -15,7 +15,7 @@ import {
 } from "react-native"
 import { AuthContext } from "../../AuthContext"
 import Apis from "../../Apis"
-
+import ReviewModal from "../../Componentes/Home/ReviewModal"
 export default function Reservas() {
   const { user, isAuthenticated, isBarOwner } = useContext(AuthContext)
   const [reservas, setReservas] = useState([])
@@ -26,7 +26,9 @@ export default function Reservas() {
 const [showRejectionModal, setShowRejectionModal] = useState(false)
   const [rejectionReason, setRejectionReason] = useState("")
   const [reservaToReject, setReservaToReject] = useState(null)
-
+ const [showReviewModal, setShowReviewModal] = useState(false)
+  const [selectedComercioForReview, setSelectedComercioForReview] = useState(null)
+ const [userReviewsByComercio, setUserReviewsByComercio] = useState({})
   useEffect(() => {
     if (isAuthenticated && user) {
       if (isBarOwner) {
@@ -60,6 +62,7 @@ const [showRejectionModal, setShowRejectionModal] = useState(false)
 
         //const futureReservas = filterFutureReservas(userReservas)
         setReservas(userReservas)
+        await loadUserReviewsForComercios(userReservas)
       } else {
         setReservas([])
       }
@@ -236,6 +239,89 @@ const handleDeleteReserva = async (reserva) => {
     if (estado === false) return "#7c3aed" // Pendiente (morado)
     return "#7c3aed"
   }
+const puedeDejarResenia = (reserva) => {
+    // Must be approved
+    if (!reserva.estado) return false
+
+    // Must be for today
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const reservaDate = new Date(reserva.fechaReserva)
+    reservaDate.setHours(0, 0, 0, 0)
+
+   if (reservaDate.getTime() !== today.getTime()) return false
+
+    const comercioNombre = reserva.comercio?.nombre
+    if (!comercioNombre) return false
+
+    const existingReviews = userReviewsByComercio[comercioNombre] || []
+
+    if (existingReviews.length === 0) return true
+
+    const hasApprovedOrPendingReview = existingReviews.some((review) => {
+      const isPending = review.estado === false && !review.motivoRechazo
+      const isApproved = review.estado === true
+      return isPending || isApproved
+    })
+
+    return !hasApprovedOrPendingReview
+  }
+
+  const manejadorDeResenia = (reserva) => {
+    const comercioNombre = reserva.comercio?.nombre
+    if (!comercioNombre) {
+      Alert.alert("Error", "No se pudo cargar la información del comercio")
+      return
+    }
+
+    const existingReviews = userReviewsByComercio[comercioNombre] || []
+    const hasApprovedOrPendingReview = existingReviews.some((review) => {
+      const isPending = review.estado === false && !review.motivoRechazo
+      const isApproved = review.estado === true
+      return isPending || isApproved
+    })
+
+    if (hasApprovedOrPendingReview) {
+      Alert.alert(
+        "Reseña existente",
+        "Ya tienes una reseña aprobada o pendiente de aprobación para este comercio. Puedes editarla desde tu perfil si fue rechazada.",
+      )
+      return
+    }
+
+    if (reserva.comercio) {
+      setSelectedComercioForReview(reserva.comercio)
+      setShowReviewModal(true)
+    } else {
+      Alert.alert("Error", "No se pudo cargar la información del comercio")
+    }
+  }
+
+  const loadUserReviewsForComercios = async (reservasList) => {
+    try {
+      const comercioNames = [...new Set(reservasList.map((r) => r.comercio?.nombre).filter(Boolean))]
+
+      const reviewsMap = {}
+
+      for (const nombreComercio of comercioNames) {
+        try {
+          const response = await Apis.obtenerReseniasPorComercio(nombreComercio)
+          if (response.status === 200 && response.data) {
+            const userReviews = response.data.filter((r) => r.iD_Usuario === user.iD_Usuario)
+            reviewsMap[nombreComercio] = userReviews
+          }
+        } catch (error) {
+          console.error(`Error loading reviews for ${nombreComercio}:`, error)
+          reviewsMap[nombreComercio] = []
+        }
+      }
+
+      setUserReviewsByComercio(reviewsMap)
+    } catch (error) {
+      console.error("Error loading user reviews:", error)
+    }
+  }
 
   const renderUserReservaItem = ({ item }) => (
     <View style={styles.reservaItem}>
@@ -271,10 +357,19 @@ const handleDeleteReserva = async (reserva) => {
           <Text style={styles.rejectionReasonText}>{item.motivoRechazo}</Text>
         </View>
       )}
+      <View style={styles.userActionButtons}>
        <TouchableOpacity style={styles.deleteButton} onPress={() => handleUserDeleteReserva(item.iD_Reserva)}>
         <Text style={styles.deleteButtonIcon}>🗑️</Text>
-        <Text style={styles.deleteButtonText}>Eliminar Reserva</Text>
-      </TouchableOpacity>
+        <Text style={styles.deleteButtonText}>Eliminar</Text>
+        </TouchableOpacity>
+        {puedeDejarResenia(item) && (
+          <TouchableOpacity style={styles.reviewButton} onPress={() => manejadorDeResenia(item)}>
+            <Text style={styles.reviewButtonIcon}>⭐</Text>
+            <Text style={styles.reviewButtonText}>Dejar Reseña</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      
     </View>
   )
     
@@ -485,6 +580,19 @@ const handleDeleteReserva = async (reserva) => {
           contentContainerStyle={styles.listContainer}
         />
       )}
+       <ReviewModal
+        visible={showReviewModal}
+        onClose={() => {
+          setShowReviewModal(false)
+          setSelectedComercioForReview(null)
+          if (isBarOwner) {
+            loadComerciosAndReservas()
+          } else {
+            loadUserReservas()
+          }
+        }}
+        comercio={selectedComercioForReview}
+      />
     </View>
   )
 }
@@ -813,7 +921,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
+  reviewButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(157, 78, 221, 0.8)",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(157, 78, 221, 0.5)",
+    gap: 8,
+  },
+  reviewButtonIcon: {
+    fontSize: 18,
+  },
+  reviewButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  userActionButtons: {
+    flexDirection: "row",
+    marginTop: 12,
+    gap: 10,
+  },
   deleteButton: {
+    flex:1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -821,7 +956,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 10,
-    marginTop: 12,
+    
     borderWidth: 1,
     borderColor: "rgba(220, 38, 38, 0.5)",
     gap: 8,

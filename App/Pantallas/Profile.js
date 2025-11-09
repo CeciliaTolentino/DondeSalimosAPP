@@ -10,11 +10,10 @@ import {
   Image,
   ScrollView,
   Modal, 
-   SafeAreaView,
 } from "react-native"
 import { AuthContext } from "../../AuthContext"
 import Apis from "../../Apis"
-import { logCurlCommand } from "../../utils/curl-generator"
+
 
 const PlaceIcon = ({ tipo }) => {
   const icons = {
@@ -107,27 +106,6 @@ const ComercioStatus = ({ userId }) => {
     }
   }
 }
-
-// funcion auxiliar para cuando una publicidad es expirada
-const isPublicidadExpirada = (fechaExpiracion) => {
-  if (!fechaExpiracion) return false // If no expiration date, it's not expired
-  const now = new Date()
-  const expiryDate = new Date(fechaExpiracion)
-  return now > expiryDate
-}
-
-
-// funcion auxiliar para la reserva
-const getReservaEstado = (reserva) => {
-  if (reserva.estado === true) {
-    return { text: "Aprobada", style: styles.estadoActivo }
-  } else if (reserva.motivoRechazo) {
-    return { text: "Rechazada", style: styles.estadoRechazado }
-  } else {
-    return { text: "Pendiente", style: styles.estadoInactivo }
-  }
-}
-
 export default function Profile() {
   const { user, isBarOwner, isAdmin, isApproved, updateAuth, buscarUsuarioPorId,  eliminarUsuario, logout } =
     useContext(AuthContext)
@@ -136,7 +114,6 @@ export default function Profile() {
   
   const [phoneNumber, setPhoneNumber] = useState("")
 
-  const [solicitandoReactivacion, setSolicitandoReactivacion] = useState(false)
   const [userStats, setUserStats] = useState({ totalReseñas: 0, lugaresVisitados: 0 })
    const [comercioStats, setComercioStats] = useState({
     reseñasRecibidas: 0,
@@ -282,7 +259,6 @@ const [showReseñasRecibidasModal, setShowReseñasRecibidasModal] = useState(fal
         loadComercioStats()
         loadReseñasRecibidas()
         loadPublicidades()
-        loadReservasRecibidas()
       } else {
         console.log(" Cargando estadísticas de usuario normal...")
         loadUserStats()
@@ -431,10 +407,7 @@ let totalPublicidades = 0
           const publicidadesResponse = await Apis.obtenerPublicidadesPorNombreComercio(comercio.nombre)
           const comercioPublicidades = publicidadesResponse.data || []
 
-          const formattedPublicidades = comercioPublicidades.map((p) => {
-            console.log(` Publicidad ${p.iD_Publicidad}: estado=${p.estado}, fechaExpiracion=${p.fechaExpiracion}`)
-
-            return {
+          const formattedPublicidades = comercioPublicidades.map((p) => ({
             id: p.iD_Publicidad,
             comercio: comercio.nombre,
             descripcion: p.descripcion || "Sin descripción",
@@ -442,9 +415,7 @@ let totalPublicidades = 0
             estado: p.estado,
             fechaCreacion: new Date(p.fechaCreacion),
             fechaExpiracion: p.fechaExpiracion ? new Date(p.fechaExpiracion) : null,
-            }
-          })
-          
+          }))
 
           allPublicidades = [...allPublicidades, ...formattedPublicidades]
         } catch (error) {
@@ -453,7 +424,7 @@ let totalPublicidades = 0
       }
 
       setPublicidades(allPublicidades)
-      console.log(" Publicidades cargadas:", allPublicidades.length)
+      console.log(" ✅ Publicidades cargadas:", allPublicidades.length)
     } catch (error) {
       console.error(" Error al cargar publicidades:", error)
       setPublicidades([])
@@ -546,91 +517,35 @@ let totalPublicidades = 0
     }
   }
   const loadReservasRecibidas = async () => {
-   // Obtener comercios del usuario primero para obtener sus IDs
-    let comercioIds = []
-    let userComerciosData = [] // To store comercios data for later use
- try {
-      const comerciosResponse = await Apis.obtenerComerciosListado()
-      userComerciosData = comerciosResponse.data.filter((c) => c.iD_Usuario === user.iD_Usuario)
-      comercioIds = userComerciosData.map((c) => c.iD_Comercio)
-      console.log(" Comercios del usuario:", userComerciosData.length)
-    } catch (error) {
-      console.error(" Error al obtener comercios para IDs:", error)
-      setReservasRecibidas([]) // Resetear en caso de error
-      return // Salir si no se pueden obtener los comercios
-    }
-
-    if (!comercioIds || comercioIds.length === 0) {
-      console.log(" No hay comercios para cargar reservas")
-      return
-    }
+    if (!user?.iD_Usuario) return
 
     try {
-      console.log(" 📡 Llamando a obtenerReservasListado...")
-      console.log(" URL:", `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/Reservas/listado`)
-      console.log(" Método: GET")
+      const comerciosResponse = await Apis.obtenerComerciosListado()
+      const userComercios = comerciosResponse.data.filter((c) => c.iD_Usuario == user.iD_Usuario)
 
-      try {
-        logCurlCommand({
-          url: `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/Reservas/listado`,
-          method: "GET",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${user.token || "NO_TOKEN"}`,
-          },
-        })
-      } catch (curlError) {
-        console.log(" No se pudo generar curl command:", curlError.message)
+      if (userComercios.length === 0) {
+        console.log("Usuario no tiene comercios para cargar reservas")
+        return
       }
 
       const reservasResponse = await Apis.obtenerReservasListado()
-
-      console.log(" ✅ Respuesta recibida, status:", reservasResponse.status)
-      console.log(" Datos recibidos:", reservasResponse.data?.length || 0, "reservas")
-
+      const comercioIds = userComercios.map((c) => c.iD_Comercio)
       const userReservas = reservasResponse.data.filter((reserva) => comercioIds.includes(reserva.iD_Comercio))
 
-      const formattedReservas = userReservas.map((r) => {
-        console.log(
-          `Reserva ${r.iD_Reserva}: estado=${r.estado}, motivoRechazo=${r.motivoRechazo}, comenzales=${r.comenzales}`,
-        )
-
-        return {
-          id: r.iD_Reserva,
-          comercio: userComerciosData.find((c) => c.iD_Comercio === r.iD_Comercio)?.nombre || "Comercio desconocido",
-          usuario: r.usuario?.nombreUsuario || "Usuario desconocido",
-          fecha: new Date(r.fechaReserva),
-          cantidadPersonas: r.comenzales || 0, // Usando comenzales del backend
-          estado: r.estado, // true = aprobada, false = pendiente o rechazada
-          motivoRechazo: r.motivoRechazo, // Para distinguir rechazada de pendiente
-        }
-      })
+      const formattedReservas = userReservas.map((r) => ({
+        id: r.iD_Reserva,
+        comercio: userComercios.find((c) => c.iD_Comercio === r.iD_Comercio)?.nombre || "Comercio desconocido",
+        usuario: r.usuario?.nombreUsuario || "Usuario desconocido",
+        fecha: new Date(r.fechaReserva),
+        cantidadPersonas: r.cantidadPersonas,
+        estado: r.estado,
+        aprobada: r.aprobada,
+      }))
 
       setReservasRecibidas(formattedReservas)
       console.log("✅ Reservas recibidas cargadas:", formattedReservas.length)
     } catch (error) {
-      console.error(" ❌ Error al cargar reservas del comercio:", {
-        error: error.message || "Unknown error",
-        response: error.response?.data,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-      })
-
-      try {
-        logCurlCommand({
-          url: `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/Reservas/listado`,
-          method: "GET",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${user.token || "NO_TOKEN"}`,
-          },
-        })
-      } catch (curlError) {
-        console.log(" No se pudo generar curl command:", curlError.message)
-      }
-
+      console.error("Error al cargar reservas recibidas:", error)
       setReservasRecibidas([])
     }
   }
@@ -676,46 +591,7 @@ useEffect(() => {
   const handleEdit = () => {
     setIsEditing(true)
   }
-const handleSolicitarReactivacion = async () => {
-    Alert.alert(
-      "Solicitar Reactivación",
-      "¿Desea solicitar la reactivación de su cuenta? El administrador revisará su solicitud.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Solicitar",
-          onPress: async () => {
-            try {
-              setSolicitandoReactivacion(true)
 
-              const updatedUser = {
-                ...user,
-                solicitudReactivacion: true, // Flag para indicar que solicitó reactivación
-              }
-
-              await Apis.actualizardatosUsuario(updatedUser)
-
-              Alert.alert(
-                "Solicitud Enviada",
-                "Su solicitud de reactivación ha sido enviada al administrador. Recibirá una notificación cuando sea procesada.",
-              )
-
-              // Actualizar el contexto local
-              const updatedUserFromBackend = await buscarUsuarioPorId(user.iD_Usuario)
-              if (updatedUserFromBackend) {
-                updateAuth(updatedUserFromBackend, true)
-              }
-            } catch (error) {
-              console.error("Error al solicitar reactivación:", error)
-              Alert.alert("Error", "No se pudo enviar la solicitud de reactivación")
-            } finally {
-              setSolicitandoReactivacion(false)
-            }
-          },
-        },
-      ],
-    )
-  }
   const handleSave = async () => {
     if (!editedUser.nombreUsuario.trim()) {
       Alert.alert("Error", "El nombre de usuario es obligatorio")
@@ -783,138 +659,34 @@ console.log("ANTES de actualizar - isApproved:", isApproved)
     setIsEditing(false)
   }
 
-const handleDeleteProfile = async () => {
-    try {
-      // Verificar si el usuario tiene comercios
-      const comerciosResponse = await Apis.obtenerComerciosListado()
-      const userComercios = comerciosResponse.data?.filter((c) => c.iD_Usuario === user.iD_Usuario) || []
 
-      if (userComercios.length > 0) {
-        // Usuario tiene comercios - mostrar alerta especial
-        Alert.alert(
-          "Confirmar eliminación completa",
-          `Usted tiene ${userComercios.length} comercio(s) registrado(s). Al eliminar su perfil se eliminarán:\n\n• Todos sus comercios\n• Todas las publicidades de sus comercios\n• Todas las reseñas de sus comercios\n\nEsta acción NO se puede deshacer. ¿Está seguro?`,
-          [
-            {
-              text: "Cancelar",
-              style: "cancel",
-            },
-            {
-              text: "Eliminar todo",
-              style: "destructive",
-              onPress: () => {
-                // Segunda confirmación
-                Alert.alert(
-                  "Última confirmación",
-                  "¿Realmente desea eliminar su perfil y todos sus comercios? Esta acción es PERMANENTE.",
-                  [
-                    {
-                      text: "Cancelar",
-                      style: "cancel",
-                    },
-                    {
-                      text: "Sí, eliminar todo",
-                      style: "destructive",
-                      onPress: async () => {
-                        await deleteUserWithComercios(userComercios)
-                      },
-                    },
-                  ],
-                )
-              },
-            },
-          ],
-        )
-      } else {
-        // Usuario sin comercios - alerta normal
-        Alert.alert(
-          "Confirmar eliminación",
-          "¿Está seguro que desea eliminar su perfil? Esta acción no se puede deshacer.",
-          [
-            {
-              text: "Cancelar",
-              style: "cancel",
-            },
-            {
-              text: "Eliminar",
-              style: "destructive",
-              onPress: async () => {
-                setIsLoading(true)
-                try {
-                  await eliminarUsuario(user.iD_Usuario)
-                  Alert.alert("Perfil eliminado", "Su perfil ha sido eliminado exitosamente.")
-                } catch (error) {
-                  console.log("Error al eliminar perfil:", error)
-                  Alert.alert("Error", "No se pudo eliminar el perfil. Por favor, intente de nuevo.")
-                } finally {
-                  setIsLoading(false)
-                }
-              },
-            },
-          ],
-        )
-      }
-    } catch (error) {
-      console.log("Error al verificar comercios:", error)
-      Alert.alert("Error", "No se pudo verificar sus comercios. Por favor, intente de nuevo.")
-    }
-  }
-
-  const deleteUserWithComercios = async (userComercios) => {
-    setIsLoading(true)
-    try {
-      console.log(`Iniciando eliminación de ${userComercios.length} comercio(s)...`)
-
-      // Para cada comercio del usuario
-      for (const comercio of userComercios) {
-        console.log(`Eliminando comercio: ${comercio.nombre}`)
-
-        // 1. Eliminar todas las publicidades del comercio
-        try {
-          const publicidadesResponse = await Apis.obtenerPublicidadesListado()
-          const comercioPublicidades =
-            publicidadesResponse.data?.filter((p) => p.iD_Comercio === comercio.iD_Comercio) || []
-
-          console.log(`Eliminando ${comercioPublicidades.length} publicidad(es)...`)
-          for (const pub of comercioPublicidades) {
-            await Apis.eliminarPublicidad(pub.iD_Publicidad)
-          }
-        } catch (error) {
-          console.error("Error al eliminar publicidades:", error)
-        }
-
-        // 2. Eliminar todas las reseñas del comercio
-        try {
-          const reseniasResponse = await Apis.obtenerResenias()
-          const comercioResenias = reseniasResponse.data?.filter((r) => r.iD_Comercio === comercio.iD_Comercio) || []
-
-          console.log(`Eliminando ${comercioResenias.length} reseña(s)...`)
-          for (const resenia of comercioResenias) {
-            await Apis.eliminarResenia(resenia.iD_Resenia)
-          }
-        } catch (error) {
-          console.error("Error al eliminar reseñas:", error)
-        }
-
-        // 3. Eliminar el comercio
-        await Apis.eliminarComercio(comercio.iD_Comercio)
-        console.log(`Comercio ${comercio.nombre} eliminado`)
-      }
-
-      // 4. Finalmente eliminar el usuario
-      console.log("Eliminando usuario...")
-      await eliminarUsuario(user.iD_Usuario)
-
-      Alert.alert("Eliminación completa", "Su perfil y todos sus comercios han sido eliminados exitosamente.")
-    } catch (error) {
-      console.log("Error al eliminar perfil con comercios:", error)
-      Alert.alert(
-        "Error",
-        "Hubo un problema al eliminar su perfil. Algunos datos pueden no haberse eliminado. Por favor, contacte al soporte.",
-      )
-    } finally {
-      setIsLoading(false)
-    }
+  const handleDeleteProfile = () => {
+    Alert.alert(
+      "Confirmar eliminación",
+      "¿Está seguro que desea eliminar su perfil? Esta acción no se puede deshacer.",
+      [
+        {
+          text: "Cancelar",
+          style: "cancel",
+        },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: async () => {
+            setIsLoading(true)
+            try {
+              await eliminarUsuario(user.iD_Usuario)
+              Alert.alert("Perfil eliminado", "Su perfil ha sido eliminado exitosamente.")
+            } catch (error) {
+              console.error("Error al eliminar perfil:", error)
+              Alert.alert("Error", "No se pudo eliminar el perfil. Por favor, intente de nuevo.")
+            } finally {
+              setIsLoading(false)
+            }
+          },
+        },
+      ],
+    )
   }
 
   if (!user) {
@@ -1056,636 +828,549 @@ const handleDeleteProfile = async () => {
     )
   }
 
-  // Agregar banner de usuario desactivado
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {user && !user.estado && (
-          <View style={styles.desactivadoBanner}>
-            <Text style={styles.desactivadoTitle}>⚠️ Cuenta Desactivada</Text>
-            <Text style={styles.desactivadoText}>Su cuenta ha sido desactivada por el administrador.</Text>
-            {user.motivoRechazo && (
-              <View style={styles.motivoRechazoContainer}>
-                <Text style={styles.motivoRechazoLabel}>Motivo:</Text>
-                <Text style={styles.motivoRechazoText}>{user.motivoRechazo}</Text>
-              </View>
-            )}
-            {!user.solicitudReactivacion ? (
-              <TouchableOpacity
-                style={styles.solicitarReactivacionButton}
-                onPress={handleSolicitarReactivacion}
-                disabled={solicitandoReactivacion}
-              >
-                {solicitandoReactivacion ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Text style={styles.solicitarReactivacionText}>Solicitar Reactivación</Text>
-                )}
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.solicitudPendienteContainer}>
-                <Text style={styles.solicitudPendienteText}>
-                  ✓ Solicitud de reactivación enviada. Esperando respuesta del administrador.
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {user.photo && (
-          <View style={styles.photoContainer}>
-            <View style={isBarOwner ? styles.barOwnerPhotoGlow : styles.photoGlow}>
-              <Image source={{ uri: user.photo }} style={styles.profilePhoto} />
+   return (
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {isBarOwner ? (
+        <>
+        <View style={styles.barOwnerHeader}>
+          <Text style={styles.barOwnerBadge}>🏪 DUEÑO DEL COMERCIO</Text>
+          <Text style={styles.barOwnerTitle}>Mi Negocio</Text>
+        </View>
+       {getBarOwnerBadges(comercioStats.totalPublicidades, comercioStats.totalReservas).length > 0 && (
+            <View style={styles.badgesContainer}>
+              {getBarOwnerBadges(comercioStats.totalPublicidades, comercioStats.totalReservas).map((badge, index) => (
+                <View key={index} style={[styles.badge, { borderColor: badge.color }]}>
+                  <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                  <Text style={[styles.badgeText, { color: badge.color }]}>{badge.text}</Text>
+                </View>
+              ))}
             </View>
+          )}
+        </>
+      ) : (
+        <>
+          <View style={styles.userHeader}>
+            <Text style={styles.userBadge}>👤 USUARIO</Text>
+            <Text style={styles.userTitle}>Mi Perfil</Text>
           </View>
-        )}
 
-        {!isEditing && (
-          <>
-            {isBarOwner ? (
-              <>
-                <View style={styles.barOwnerHeader}>
-                  <Text style={styles.barOwnerBadge}>🏪 DUEÑO DEL COMERCIO</Text>
-                  <Text style={styles.barOwnerTitle}>Mi Negocio</Text>
+          {getUserBadges(userStats.totalReseñas, userStats.lugaresVisitados).length > 0 && (
+            <View style={styles.badgesContainer}>
+              {getUserBadges(userStats.totalReseñas, userStats.lugaresVisitados).map((badge, index) => (
+                <View key={index} style={[styles.badge, { borderColor: badge.color }]}>
+                  <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                  <Text style={[styles.badgeText, { color: badge.color }]}>{badge.text}</Text>
                 </View>
-                {getBarOwnerBadges(comercioStats.totalPublicidades, comercioStats.totalReservas).length > 0 && (
-                  <View style={styles.badgesContainer}>
-                    {getBarOwnerBadges(comercioStats.totalPublicidades, comercioStats.totalReservas).map(
-                      (badge, index) => (
-                        <View key={index} style={[styles.badge, { borderColor: badge.color }]}>
-                          <Text style={styles.badgeIcon}>{badge.icon}</Text>
-                          <Text style={[styles.badgeText, { color: badge.color }]}>{badge.text}</Text>
-                        </View>
-                      ),
-                    )}
-                  </View>
-                )}
+              ))}
+            </View>
+          )}
+        </>
+      )}
 
-                <View style={styles.statsContainer}>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statNumber}>{comercioStats.reseñasRecibidas}</Text>
-                    <Text style={styles.statLabel}>Reseñas Recibidas</Text>
-                  </View>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statNumber}>{comercioStats.visualizacionesTotales}</Text>
-                    <Text style={styles.statLabel}>Visualizaciones</Text>
-                  </View>
+      {user.photo && (
+        <View style={styles.photoContainer}>
+          <View style={isBarOwner ? styles.barOwnerPhotoGlow : styles.photoGlow}>
+            <Image source={{ uri: user.photo }} style={styles.profilePhoto} />
+          </View>
+        </View>
+      )}
+
+      {!isEditing && (
+        <>
+          {isBarOwner ? (
+            <>
+              <View style={styles.statsContainer}>
+                <View style={styles.statCard}>
+                  <Text style={styles.statNumber}>{comercioStats.reseñasRecibidas}</Text>
+                  <Text style={styles.statLabel}>Reseñas Recibidas</Text>
                 </View>
-
-                <View style={styles.historySection}>
-                  <View style={styles.tabsContainer}>
-                    <TouchableOpacity
-                      style={[styles.tab, activeTab === "reseñas" && styles.activeTab]}
-                      onPress={() => setActiveTab("reseñas")}
-                    >
-                      <Text style={[styles.tabText, activeTab === "reseñas" && styles.activeTabText]}>
-                        Reseñas Recibidas
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tab, activeTab === "publicidades" && styles.activeTab]}
-                      onPress={() => setActiveTab("publicidades")}
-                    >
-                      <Text style={[styles.tabText, activeTab === "publicidades" && styles.activeTabText]}>
-                        Mis Publicidades
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tab, activeTab === "reservas" && styles.activeTab]}
-                      onPress={() => setActiveTab("reservas")}
-                    >
-                      <Text style={[styles.tabText, activeTab === "reservas" && styles.activeTabText]}>
-                        Reservas Recibidas
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <ScrollView style={styles.historyContent} showsVerticalScrollIndicator={false}>
-                    {activeTab === "reseñas" ? (
-                      reseñasRecibidas.length > 0 ? (
-                        <>
-                          {reseñasRecibidas.slice(0, 2).map((reseña) => (
-                            <View key={reseña.id} style={styles.reviewCard}>
-                              <View style={styles.reviewHeader}>
-                                <View style={styles.reviewHeaderText}>
-                                  <Text style={styles.reviewPlace}>{reseña.comercio}</Text>
-                                  <Text style={styles.reviewUser}>Por: {reseña.usuario}</Text>
-                                  <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
-                                </View>
-                              </View>
-                              <Text style={styles.reviewComment} numberOfLines={3}>
-                                {reseña.comentario}
-                              </Text>
-                            </View>
-                          ))}
-                          {reseñasRecibidas.length > 2 && (
-                            <TouchableOpacity
-                              style={styles.verMasButton}
-                              onPress={() => setShowReseñasRecibidasModal(true)}
-                            >
-                              <Text style={styles.verMasText}>Ver todas ({reseñasRecibidas.length})</Text>
-                            </TouchableOpacity>
-                          )}
-                        </>
-                      ) : (
-                        <Text style={styles.emptyText}>No has recibido reseñas aún</Text>
-                      )
-                    ) : activeTab === "publicidades" ? (
-                      publicidades.length > 0 ? (
-                        <>
-                         {publicidades.slice(0, 2).map((pub) => {
-                            const isExpirada = isPublicidadExpirada(pub.fechaExpiracion)
-
-                            return (
-                              <View key={pub.id} style={styles.publicidadCard}>
-                                <View style={styles.publicidadHeader}>
-                                  <View style={styles.publicidadInfo}>
-                                    <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
-                                    <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
-                                    <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
-                                  </View>
-                                  <View style={styles.visualizacionesBadge}>
-                                    <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
-                                    <Text style={styles.visualizacionesLabel}>vistas</Text>
-                                  </View>
-                                </View>
-									 
-                                <View style={styles.publicidadFooter}>
-                                  {isExpirada ? (
-                                    <View style={[styles.estadoBadge, styles.estadoExpirado]}>
-                                      <Text style={styles.estadoText}>⌛ Expirada</Text>
-                                    </View>
-                                  ) : (
-                                    <View
-                                      style={[
-                                        styles.estadoBadge,
-                                        pub.estado ? styles.estadoActivo : styles.estadoInactivo,
-                                      ]}
-                                    >
-                                      <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
-                                    </View>
-                                  )}
-                                  {pub.fechaExpiracion && (
-                                    <Text style={styles.expiracionText}>
-                                      {isExpirada ? "Expiró:" : "Expira:"} {getRelativeTime(pub.fechaExpiracion)}
-                                    </Text>
-                                  )}
-                                </View>
-														 
-																	  
-																				  
-										 
-								  
-                              </View>
-                            )
-                          })}
-                          {publicidades.length > 2 && (
-                            <TouchableOpacity
-                              style={styles.verMasButton}
-                              onPress={() => setShowPublicidadesModal(true)}
-                            >
-                              <Text style={styles.verMasText}>Ver todas ({publicidades.length})</Text>
-                            </TouchableOpacity>
-                          )}
-                        </>
-                      ) : (
-                        <Text style={styles.emptyText}>No tienes publicidades aún</Text>
-                      )
-                    ) : activeTab === "reservas" ? (
-                      reservasRecibidas.length > 0 ? (
-                        <>
-                          {reservasRecibidas.slice(0, 2).map((reserva) => {
-                            const estadoInfo = getReservaEstado(reserva)
-
-                            return (
-                              <View key={reserva.id} style={styles.reservaCard}>
-                                <View style={styles.reservaHeader}>
-                                  <View style={styles.reservaInfo}>
-                                    <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
-                                    <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
-                                    <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
-                                  </View>
-                                  <View style={styles.reservaPersonasBadge}>
-                                    <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
-                                    <Text style={styles.reservaPersonasLabel}>personas</Text>
-                                  </View>
-                                </View>
-									 
-                                <View style={styles.reservaFooter}>
-									 
-										  
-                                  <View style={[styles.estadoBadge, estadoInfo.style]}>
-																								   
-									
-								 
-                                    <Text style={styles.estadoText}>{estadoInfo.text}</Text>
-                                  </View>
-                                </View>
-                              </View>
-                            )
-                          })}
-                          {reservasRecibidas.length > 2 && (
-                            <TouchableOpacity
-                              style={styles.verMasButton}
-                              onPress={() => setShowReservasRecibidasModal(true)}
-                            >
-                              <Text style={styles.verMasText}>Ver todas ({reservasRecibidas.length})</Text>
-                            </TouchableOpacity>
-                          )}
-                        </>
-                      ) : (
-                        <Text style={styles.emptyText}>No has recibido reservas aún</Text>
-                      )
-                    ) : (
-                      <></>
-                    )}
-                  </ScrollView>
+                <View style={styles.statCard}>
+                  <Text style={styles.statNumber}>{comercioStats.visualizacionesTotales}</Text>
+                  <Text style={styles.statLabel}>Visualizaciones</Text>
                 </View>
-              </>
-            ) : (
-              <>
-                <View style={styles.userHeader}>
-                  <Text style={styles.userBadge}>👤 USUARIO</Text>
-                  <Text style={styles.userTitle}>Mi Perfil</Text>
-                </View>
-                {getUserBadges(userStats.totalReseñas, userStats.lugaresVisitados).length > 0 && (
-                  <View style={styles.badgesContainer}>
-                    {getUserBadges(userStats.totalReseñas, userStats.lugaresVisitados).map((badge, index) => (
-                      <View key={index} style={[styles.badge, { borderColor: badge.color }]}>
-                        <Text style={styles.badgeIcon}>{badge.icon}</Text>
-                        <Text style={[styles.badgeText, { color: badge.color }]}>{badge.text}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
+              </View>
 
-                <View style={styles.statsContainer}>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statNumber}>{userStats.totalReseñas}</Text>
-                    <Text style={styles.statLabel}>Reseñas</Text>
-                  </View>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statNumber}>{userStats.lugaresVisitados}</Text>
-                    <Text style={styles.statLabel}>Lugares</Text>
-                  </View>
+              <View style={styles.historySection}>
+                <View style={styles.tabsContainer}>
+                  <TouchableOpacity
+                    style={[styles.tab, activeTab === "reseñas" && styles.activeTab]}
+                    onPress={() => setActiveTab("reseñas")}
+                  >
+                    <Text style={[styles.tabText, activeTab === "reseñas" && styles.activeTabText]}>
+                      Reseñas Recibidas
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.tab, activeTab === "publicidades" && styles.activeTab]}
+                    onPress={() => setActiveTab("publicidades")}
+                  >
+                    <Text style={[styles.tabText, activeTab === "publicidades" && styles.activeTabText]}>
+                      Mis Publicidades
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
-                <View style={styles.historySection}>
-                  <View style={styles.tabsContainer}>
-                    <TouchableOpacity
-                      style={[styles.tab, activeTab === "reseñas" && styles.activeTab]}
-                      onPress={() => setActiveTab("reseñas")}
-                    >
-                      <Text style={[styles.tabText, activeTab === "reseñas" && styles.activeTabText]}>Mis Reseñas</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.tab, activeTab === "lugares" && styles.activeTab]}
-                      onPress={() => setActiveTab("lugares")}
-                    >
-                      <Text style={[styles.tabText, activeTab === "lugares" && styles.activeTabText]}>
-                        Lugares Visitados
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <ScrollView style={styles.historyContent} showsVerticalScrollIndicator={false}>
-                    {activeTab === "reseñas" ? (
-                      reseñas.length > 0 ? (
-                        <>
-                          {reseñas.slice(0, 3).map((reseña) => (
-                            <View key={reseña.id} style={styles.reviewCard}>
-                              <View style={styles.reviewHeader}>
-                                <PlaceIcon tipo={reseña.tipo} />
-                                <View style={styles.reviewHeaderText}>
-                                  <Text style={styles.reviewPlace}>{reseña.lugar}</Text>
-                                  <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
-                                </View>
-                              </View>
-                              <Text style={styles.reviewComment}>{reseña.comentario}</Text>
-                            </View>
-                          ))}
-                          {reseñas.length > 3 && (
-                            <TouchableOpacity style={styles.verMasButton} onPress={() => setShowReseñasModal(true)}>
-                              <Text style={styles.verMasText}>Ver todas ({reseñas.length})</Text>
-                            </TouchableOpacity>
-                          )}
-                        </>
-                      ) : (
-                        <Text style={styles.emptyText}>No has dejado reseñas aún</Text>
-                      )
-                    ) : lugaresVisitados.length > 0 ? (
+                <ScrollView style={styles.historyContent} showsVerticalScrollIndicator={false}>
+                  {activeTab === "reseñas" ? (
+                    reseñasRecibidas.length > 0 ? (
                       <>
-                        {lugaresVisitados.slice(0, 3).map((lugar) => (
-                          <View key={lugar.id} style={styles.placeCard}>
-                            <View style={styles.placeHeader}>
-                              <View style={styles.placeInfo}>
-                                <Text style={styles.placeName}>{lugar.nombre}</Text>
-                                <Text style={styles.placeAddress}>{lugar.direccion}</Text>
-                              </View>
-                              <View style={styles.visitBadge}>
-                                <Text style={styles.visitBadgeText}>{lugar.visitas} visitas</Text>
+                      {reseñasRecibidas.slice(0, 2).map((reseña) => (
+                          <View key={reseña.id} style={styles.reviewCard}>
+                            <View style={styles.reviewHeader}>
+                              <View style={styles.reviewHeaderText}>
+                                <Text style={styles.reviewPlace}>{reseña.comercio}</Text>
+                                <Text style={styles.reviewUser}>Por: {reseña.usuario}</Text>
+                                <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
                               </View>
                             </View>
-                            <Text style={styles.placeDate}>Última visita: {getRelativeTime(lugar.ultimaVisita)}</Text>
+                            <Text style={styles.reviewComment} numberOfLines={3}>
+                              {reseña.comentario}
+                            </Text>
                           </View>
                         ))}
-                        {lugaresVisitados.length > 3 && (
-                          <TouchableOpacity style={styles.verMasButton} onPress={() => setShowLugaresModal(true)}>
-                            <Text style={styles.verMasText}>Ver todos ({lugaresVisitados.length})</Text>
+                        {reseñasRecibidas.length > 2 && (
+                          <TouchableOpacity
+                            style={styles.verMasButton}
+                            onPress={() => setShowReseñasRecibidasModal(true)}
+                          >
+                            <Text style={styles.verMasText}>Ver todas ({reseñasRecibidas.length})</Text>
                           </TouchableOpacity>
                         )}
                       </>
                     ) : (
-                      <Text style={styles.emptyText}>No has visitado lugares aún</Text>
-                    )}
-                  </ScrollView>
+                      <Text style={styles.emptyText}>No has recibido reseñas aún</Text>
+                    )
+                 ) : activeTab === "publicidades" ? (
+                    publicidades.length > 0 ? (
+                    <>
+                       {publicidades.slice(0, 2).map((pub) => (
+                        <View key={pub.id} style={styles.publicidadCard}>
+                          <View style={styles.publicidadHeader}>
+                            <View style={styles.publicidadInfo}>
+                              <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
+                              <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
+                              <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
+                            </View>
+                            <View style={styles.visualizacionesBadge}>
+                              <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
+                              <Text style={styles.visualizacionesLabel}>vistas</Text>
+                            </View>
+                          </View>
+                          <View style={styles.publicidadFooter}>
+                            <View
+                              style={[styles.estadoBadge, pub.estado ? styles.estadoActivo : styles.estadoInactivo]}
+                            >
+                              <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
+                            </View>
+                            {pub.fechaExpiracion && (
+                              <Text style={styles.expiracionText}>
+                                  Expira: {getRelativeTime(pub.fechaExpiracion)}
+                                </Text>
+                            )}
+                          </View>
+                        </View>
+                      ))}
+                      {publicidades.length > 2 && (
+                       <TouchableOpacity style={styles.verMasButton} onPress={() => setShowPublicidadesModal(true)}>
+                          <Text style={styles.verMasText}>Ver todas ({publicidades.length})</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.emptyText}>No tienes publicidades aún</Text>
+                    )
+                  ) : activeTab === "reservas" ? (
+                    reservasRecibidas.length > 0 ? (
+                      
+                    <>
+                      {reservasRecibidas.slice(0, 2).map((reserva) => (
+                        <View key={reserva.id} style={styles.reservaCard}>
+                          <View style={styles.reservaHeader}>
+                            <View style={styles.reservaInfo}>
+                              <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
+                              <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
+                              <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
+                            </View>
+                            <View style={styles.reservaPersonasBadge}>
+                              <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
+                              <Text style={styles.reservaPersonasLabel}>personas</Text>
+                            </View>
+                          </View>
+                          <View style={styles.reservaFooter}>
+                            <View
+                              style={[
+                                styles.estadoBadge,
+                                reserva.aprobada ? styles.estadoActivo : styles.estadoInactivo,
+                              ]}
+                            >
+                              <Text style={styles.estadoText}>{reserva.aprobada ? "Aprobada" : "Pendiente"}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      ))}
+                      {reservasRecibidas.length > 2 && (
+                        <TouchableOpacity
+                          style={styles.verMasButton}
+                          onPress={() => setShowReservasRecibidasModal(true)}
+                        >
+                          <Text style={styles.verMasText}>Ver todas ({reservasRecibidas.length})</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.emptyText}>No has recibido reservas aún</Text>
+                  )
+                  ) : (
+                    <></>
+                  )}
+                </ScrollView>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.statsContainer}>
+                <View style={styles.statCard}>
+                  <Text style={styles.statNumber}>{userStats.totalReseñas}</Text>
+                  <Text style={styles.statLabel}>Reseñas</Text>
                 </View>
-              </>
-            )}
-          </>
-        )}
-
-        {isEditing ? (
-          <>
-            <Text style={styles.label}>Nombre de usuario *</Text>
-            <TextInput
-              style={styles.input}
-              value={editedUser.nombreUsuario}
-              onChangeText={(text) => setEditedUser({ ...editedUser, nombreUsuario: text })}
-              placeholder="Nombre de usuario"
-              placeholderTextColor="rgba(255, 255, 255, 0.4)"
-            />
-
-            <Text style={styles.label}>Teléfono</Text>
-            <TextInput
-              style={styles.input}
-              value={phoneNumber}
-              onChangeText={(text) => {
-                const cleaned = text.replace(/[^0-9]/g, "").slice(0, 10)
-                setPhoneNumber(cleaned)
-              }}
-              placeholder="1132419131 (10 dígitos)"
-              placeholderTextColor="rgba(255, 255, 255, 0.4)"
-              keyboardType="phone-pad"
-              maxLength={10}
-            />
-            <Text style={styles.helperText}>Ingrese 10 dígitos sin espacios ni guiones</Text>
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity style={[styles.button, styles.saveButton]} onPress={handleSave}>
-                <Text style={styles.buttonText}>Guardar cambios</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.cancelButton]} onPress={handleCancel}>
-                <Text style={styles.buttonText}>Cancelar</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.infoContainer}>
-              <View style={styles.infoCard}>
-                <Text style={styles.infoLabel}>Nombre</Text>
-                <Text style={styles.infoValue}>{user.nombreUsuario || user.displayName || "Sin nombre"}</Text>
+                <View style={styles.statCard}>
+                  <Text style={styles.statNumber}>{userStats.lugaresVisitados}</Text>
+                  <Text style={styles.statLabel}>Lugares</Text>
+                </View>
               </View>
 
-              <View style={styles.infoCard}>
-                <Text style={styles.infoLabel}>Email</Text>
-                <Text style={styles.infoValue}>{user.correo || user.email || "Sin email"}</Text>
-              </View>
+              <View style={styles.historySection}>
+                <View style={styles.tabsContainer}>
+                  <TouchableOpacity
+                    style={[styles.tab, activeTab === "reseñas" && styles.activeTab]}
+                    onPress={() => setActiveTab("reseñas")}
+                  >
+                    <Text style={[styles.tabText, activeTab === "reseñas" && styles.activeTabText]}>Mis Reseñas</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.tab, activeTab === "lugares" && styles.activeTab]}
+                    onPress={() => setActiveTab("lugares")}
+                  >
+                    <Text style={[styles.tabText, activeTab === "lugares" && styles.activeTabText]}>
+                      Lugares Visitados
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
-              <View style={styles.infoCard}>
-                <Text style={styles.infoLabel}>Teléfono</Text>
-                <Text style={styles.infoValue}>{user.telefono || "No especificado"}</Text>
-              </View>
-
-              {isBarOwner && <ComercioStatus userId={user.iD_Usuario} />}
-            </View>
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity style={[styles.button, styles.editButton]} onPress={handleEdit}>
-                <Text style={styles.buttonText}>Editar perfil</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.logoutButton]} onPress={logout}>
-                <Text style={styles.buttonText}>Cerrar sesión</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.deleteButton]} onPress={handleDeleteProfile}>
-                <Text style={styles.buttonText}>Eliminar perfil</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-        <Modal
-          visible={showReseñasRecibidasModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowReseñasRecibidasModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>⭐ Todas las Reseñas Recibidas</Text>
-                <TouchableOpacity onPress={() => setShowReseñasRecibidasModal(false)} style={styles.closeButton}>
-                  <Text style={styles.closeButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {reseñasRecibidas.map((reseña) => (
-                  <View key={reseña.id} style={styles.reviewCard}>
-                    <View style={styles.reviewHeader}>
-                      <View style={styles.reviewHeaderText}>
-                        <Text style={styles.reviewPlace}>{reseña.comercio}</Text>
-                        <Text style={styles.reviewUser}>Por: {reseña.usuario}</Text>
-                        <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.reviewComment}>{reseña.comentario}</Text>
-                  </View>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={showPublicidadesModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowPublicidadesModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>📢 Todas las Publicidades</Text>
-                <TouchableOpacity onPress={() => setShowPublicidadesModal(false)} style={styles.closeButton}>
-                  <Text style={styles.closeButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {publicidades.map((pub) => {
-                  const isExpirada = isPublicidadExpirada(pub.fechaExpiracion)
-
-                  return (
-                    <View key={pub.id} style={styles.publicidadCard}>
-                      <View style={styles.publicidadHeader}>
-                        <View style={styles.publicidadInfo}>
-                          <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
-                          <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
-                          <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
-                        </View>
-                        <View style={styles.visualizacionesBadge}>
-                          <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
-                          <Text style={styles.visualizacionesLabel}>vistas</Text>
-                        </View>
-                      </View>
-						   
-                      <View style={styles.publicidadFooter}>
-                        {isExpirada ? (
-                          <View style={[styles.estadoBadge, styles.estadoExpirado]}>
-                            <Text style={styles.estadoText}>⌛ Expirada</Text>
+                <ScrollView style={styles.historyContent} showsVerticalScrollIndicator={false}>
+                  {activeTab === "reseñas" ? (
+                    reseñas.length > 0 ? (
+                      <>
+                        {reseñas.slice(0, 3).map((reseña) => (
+                          <View key={reseña.id} style={styles.reviewCard}>
+                            <View style={styles.reviewHeader}>
+                              <PlaceIcon tipo={reseña.tipo} />
+                              <View style={styles.reviewHeaderText}>
+                                <Text style={styles.reviewPlace}>{reseña.lugar}</Text>
+                                <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
+                              </View>
+                            </View>
+                              <Text style={styles.reviewComment}>{reseña.comentario}</Text>
                           </View>
-                        ) : (
-                          <View style={[styles.estadoBadge, pub.estado ? styles.estadoActivo : styles.estadoInactivo]}>
-                            <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
+                        ))}
+                        {reseñas.length > 3 && (
+                          <TouchableOpacity style={styles.verMasButton} onPress={() => setShowReseñasModal(true)}>
+                            <Text style={styles.verMasText}>Ver todas ({reseñas.length})</Text>
+                          </TouchableOpacity>
+                        )}
+                      </>
+                    ) : (
+                      <Text style={styles.emptyText}>No has dejado reseñas aún</Text>
+                    )
+                  ) : lugaresVisitados.length > 0 ? (
+                    <>
+                        {lugaresVisitados.slice(0, 3).map((lugar) => (
+                        <View key={lugar.id} style={styles.placeCard}>
+                          <View style={styles.placeHeader}>
+                            <View style={styles.placeInfo}>
+                              <Text style={styles.placeName}>{lugar.nombre}</Text>
+                              <Text style={styles.placeAddress}>{lugar.direccion}</Text>
+                            </View>
+                            <View style={styles.visitBadge}>
+                              <Text style={styles.visitBadgeText}>{lugar.visitas} visitas</Text>
+                            </View>
                           </View>
-                        )}
-                        {pub.fechaExpiracion && (
-                          <Text style={styles.expiracionText}>
-                            {isExpirada ? "Expiró:" : "Expira:"} {getRelativeTime(pub.fechaExpiracion)}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-						 
-                  )
-                })}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={showReseñasModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowReseñasModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>✍️ Todas mis Reseñas</Text>
-                <TouchableOpacity onPress={() => setShowReseñasModal(false)} style={styles.closeButton}>
-                  <Text style={styles.closeButtonText}>✕</Text>
-                </TouchableOpacity>
+                          <Text style={styles.placeDate}>Última visita: {getRelativeTime(lugar.ultimaVisita)}</Text>
+                        </View>
+                      ))}
+                      {lugaresVisitados.length > 3 && (
+                         <TouchableOpacity style={styles.verMasButton} onPress={() => setShowLugaresModal(true)}>
+                          <Text style={styles.verMasText}>Ver todos ({lugaresVisitados.length})</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.emptyText}>No has visitado lugares aún</Text>
+                  )}
+                </ScrollView>
               </View>
-              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {reseñas.map((reseña) => (
-                  <View key={reseña.id} style={styles.reviewCard}>
-                    <View style={styles.reviewHeader}>
-                      <PlaceIcon tipo={reseña.tipo} />
-                      <View style={styles.reviewHeaderText}>
-                        <Text style={styles.reviewPlace}>{reseña.lugar}</Text>
-                        <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
-                      </View>
+            </>
+          )}
+        </>
+      )}
+
+      {isEditing ? (
+        <>
+          <Text style={styles.label}>Nombre de usuario *</Text>
+          <TextInput
+            style={styles.input}
+            value={editedUser.nombreUsuario}
+            onChangeText={(text) => setEditedUser({ ...editedUser, nombreUsuario: text })}
+            placeholder="Nombre de usuario"
+            placeholderTextColor="rgba(255, 255, 255, 0.4)"
+          />
+
+          <Text style={styles.label}>Teléfono</Text>
+          <TextInput
+            style={styles.input}
+            value={phoneNumber}
+            onChangeText={(text) => {
+              const cleaned = text.replace(/[^0-9]/g, "").slice(0, 10)
+              setPhoneNumber(cleaned)
+            }}
+            placeholder="1132419131 (10 dígitos)"
+            placeholderTextColor="rgba(255, 255, 255, 0.4)"
+            keyboardType="phone-pad"
+            maxLength={10}
+          />
+          <Text style={styles.helperText}>Ingrese 10 dígitos sin espacios ni guiones</Text>
+
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity style={[styles.button, styles.saveButton]} onPress={handleSave}>
+              <Text style={styles.buttonText}>Guardar cambios</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.button, styles.cancelButton]} onPress={handleCancel}>
+              <Text style={styles.buttonText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : (
+        <>
+          <View style={styles.infoContainer}>
+            <View style={styles.infoCard}>
+              <Text style={styles.infoLabel}>Nombre</Text>
+              <Text style={styles.infoValue}>{user.nombreUsuario || user.displayName || "Sin nombre"}</Text>
+            </View>
+
+            <View style={styles.infoCard}>
+              <Text style={styles.infoLabel}>Email</Text>
+              <Text style={styles.infoValue}>{user.correo || user.email || "Sin email"}</Text>
+            </View>
+
+            <View style={styles.infoCard}>
+              <Text style={styles.infoLabel}>Teléfono</Text>
+              <Text style={styles.infoValue}>{user.telefono || "No especificado"}</Text>
+            </View>
+
+            {isBarOwner && <ComercioStatus userId={user.iD_Usuario} />}
+          </View>
+
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity style={[styles.button, styles.editButton]} onPress={handleEdit}>
+              <Text style={styles.buttonText}>Editar perfil</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.button, styles.logoutButton]} onPress={logout}>
+              <Text style={styles.buttonText}>Cerrar sesión</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.button, styles.deleteButton]} onPress={handleDeleteProfile}>
+              <Text style={styles.buttonText}>Eliminar perfil</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+      <Modal
+        visible={showReseñasRecibidasModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowReseñasRecibidasModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>⭐ Todas las Reseñas Recibidas</Text>
+              <TouchableOpacity onPress={() => setShowReseñasRecibidasModal(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
+              {reseñasRecibidas.map((reseña) => (
+                <View key={reseña.id} style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewHeaderText}>
+                      <Text style={styles.reviewPlace}>{reseña.comercio}</Text>
+                      <Text style={styles.reviewUser}>Por: {reseña.usuario}</Text>
+                      <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
                     </View>
-                    <Text style={styles.reviewComment}>{reseña.comentario}</Text>
                   </View>
-                ))}
-              </ScrollView>
-            </View>
+                  <Text style={styles.reviewComment}>{reseña.comentario}</Text>
+                </View>
+              ))}
+            </ScrollView>
           </View>
-        </Modal>
+        </View>
+      </Modal>
 
-        <Modal
-          visible={showLugaresModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowLugaresModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>🗺️ Todos los Lugares Visitados</Text>
-                <TouchableOpacity onPress={() => setShowLugaresModal(false)} style={styles.closeButton}>
-                  <Text style={styles.closeButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {lugaresVisitados.map((lugar) => (
-                  <View key={lugar.id} style={styles.placeCard}>
-                    <View style={styles.placeHeader}>
-                      <View style={styles.placeInfo}>
-                        <Text style={styles.placeName}>{lugar.nombre}</Text>
-                        <Text style={styles.placeAddress}>{lugar.direccion}</Text>
-                      </View>
-                      <View style={styles.visitBadge}>
-                        <Text style={styles.visitBadgeText}>{lugar.visitas} visitas</Text>
-                      </View>
+      <Modal
+        visible={showPublicidadesModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowPublicidadesModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📢 Todas las Publicidades</Text>
+              <TouchableOpacity onPress={() => setShowPublicidadesModal(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
+              {publicidades.map((pub) => (
+                <View key={pub.id} style={styles.publicidadCard}>
+                  <View style={styles.publicidadHeader}>
+                    <View style={styles.publicidadInfo}>
+                      <Text style={styles.publicidadComercio}>{pub.comercio}</Text>
+                      <Text style={styles.publicidadDescripcion}>{pub.descripcion}</Text>
+                      <Text style={styles.publicidadDate}>{getRelativeTime(pub.fechaCreacion)}</Text>
                     </View>
-                    <Text style={styles.placeDate}>Última visita: {getRelativeTime(lugar.ultimaVisita)}</Text>
+                    <View style={styles.visualizacionesBadge}>
+                      <Text style={styles.visualizacionesNumber}>{pub.visualizaciones}</Text>
+                      <Text style={styles.visualizacionesLabel}>vistas</Text>
+                    </View>
                   </View>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-        <Modal
-          visible={showReservasRecibidasModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowReservasRecibidasModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>📅 Todas las Reservas Recibidas</Text>
-                <TouchableOpacity onPress={() => setShowReservasRecibidasModal(false)} style={styles.closeButton}>
-                  <Text style={styles.closeButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
-                {reservasRecibidas.map((reserva) => {
-                  const estadoInfo = getReservaEstado(reserva)
-
-                  return (
-                    <View key={reserva.id} style={styles.reservaCard}>
-                      <View style={styles.reservaHeader}>
-                        <View style={styles.reservaInfo}>
-                          <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
-                          <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
-                          <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
-                        </View>
-                        <View style={styles.reservaPersonasBadge}>
-                          <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
-                          <Text style={styles.reservaPersonasLabel}>personas</Text>
-                        </View>
-                      </View>
-						   
-                      <View style={styles.reservaFooter}>
-						   
-                        <View style={[styles.estadoBadge, estadoInfo.style]}>
-					   
-                          <Text style={styles.estadoText}>{estadoInfo.text}</Text>
-                        </View>
-                      </View>
+                  <View style={styles.publicidadFooter}>
+                    <View style={[styles.estadoBadge, pub.estado ? styles.estadoActivo : styles.estadoInactivo]}>
+                      <Text style={styles.estadoText}>{pub.estado ? "Activa" : "Inactiva"}</Text>
                     </View>
-                  )
-                })}
-              </ScrollView>
-            </View>
+                    {pub.fechaExpiracion && (
+                      <Text style={styles.expiracionText}>Expira: {getRelativeTime(pub.fechaExpiracion)}</Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
           </View>
-        </Modal>
-      </ScrollView>
-    </SafeAreaView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showReseñasModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowReseñasModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>✍️ Todas mis Reseñas</Text>
+              <TouchableOpacity onPress={() => setShowReseñasModal(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
+              {reseñas.map((reseña) => (
+                <View key={reseña.id} style={styles.reviewCard}>
+                  <View style={styles.reviewHeader}>
+                    <PlaceIcon tipo={reseña.tipo} />
+                    <View style={styles.reviewHeaderText}>
+                      <Text style={styles.reviewPlace}>{reseña.lugar}</Text>
+                      <Text style={styles.reviewDate}>{getRelativeTime(reseña.fecha)}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.reviewComment}>{reseña.comentario}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showLugaresModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowLugaresModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🗺️ Todos los Lugares Visitados</Text>
+              <TouchableOpacity onPress={() => setShowLugaresModal(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
+              {lugaresVisitados.map((lugar) => (
+                <View key={lugar.id} style={styles.placeCard}>
+                  <View style={styles.placeHeader}>
+                    <View style={styles.placeInfo}>
+                      <Text style={styles.placeName}>{lugar.nombre}</Text>
+                      <Text style={styles.placeAddress}>{lugar.direccion}</Text>
+                    </View>
+                    <View style={styles.visitBadge}>
+                      <Text style={styles.visitBadgeText}>{lugar.visitas} visitas</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.placeDate}>Última visita: {getRelativeTime(lugar.ultimaVisita)}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={showReservasRecibidasModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowReservasRecibidasModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📅 Todas las Reservas Recibidas</Text>
+              <TouchableOpacity onPress={() => setShowReservasRecibidasModal(false)} style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={true}>
+              {reservasRecibidas.map((reserva) => (
+                <View key={reserva.id} style={styles.reservaCard}>
+                  <View style={styles.reservaHeader}>
+                    <View style={styles.reservaInfo}>
+                      <Text style={styles.reservaComercio}>{reserva.comercio}</Text>
+                      <Text style={styles.reservaUsuario}>Cliente: {reserva.usuario}</Text>
+                      <Text style={styles.reservaDate}>{getRelativeTime(reserva.fecha)}</Text>
+                    </View>
+                    <View style={styles.reservaPersonasBadge}>
+                      <Text style={styles.reservaPersonasNumber}>{reserva.cantidadPersonas}</Text>
+                      <Text style={styles.reservaPersonasLabel}>personas</Text>
+                    </View>
+                  </View>
+                  <View style={styles.reservaFooter}>
+                    <View style={[styles.estadoBadge, reserva.aprobada ? styles.estadoActivo : styles.estadoInactivo]}>
+                      <Text style={styles.estadoText}>{reserva.aprobada ? "Aprobada" : "Pendiente"}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a2e",
-  },
-  scrollContent: {
     padding: 20,
+    backgroundColor: "#1a1a2e",
   },
   loadingContainer: {
     flex: 1,
@@ -1907,10 +1592,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "rgba(255, 255, 255, 0.5)",
   },
-  estadoExpirado: {
-    backgroundColor: "rgba(156, 163, 175, 0.2)",
-    borderColor: "#9ca3af",
-  },
   placeCard: {
     backgroundColor: "rgba(58, 9, 103, 0.3)",
     borderRadius: 12,
@@ -2054,7 +1735,7 @@ const styles = StyleSheet.create({
   editButton: {
     backgroundColor: "rgba(58, 9, 103, 0.6)",
     borderWidth: 1,
-    borderColor: "rgba(216, 56, 245, 0.4)",
+    borderColor: "rgba(216, 56, 245, 0.5)",
   },
   saveButton: {
     backgroundColor: "rgba(74, 222, 128, 0.8)",
@@ -2431,13 +2112,13 @@ const styles = StyleSheet.create({
     padding: 20,
     maxHeight: "100%",
   },
-  reservaCard: {
-     backgroundColor: "rgba(58, 9, 103, 0.3)",
+    reservaCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(216, 56, 245, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
   reservaHeader: {
     flexDirection: "row",
@@ -2484,73 +2165,5 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-  },
-
-  desactivadoBanner: {
-    backgroundColor: "rgba(220, 53, 69, 0.2)",
-    borderWidth: 2,
-    borderColor: "rgba(220, 53, 69, 0.5)",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-  },
-  desactivadoTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#ff6b6b",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-  desactivadoText: {
-    fontSize: 14,
-    color: "#ffffff",
-    marginBottom: 15,
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  motivoRechazoContainer: {
-    backgroundColor: "rgba(0, 0, 0, 0.3)",
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 15,
-  },
-  motivoRechazoLabel: {
-    fontSize: 12,
-    fontWeight: "bold",
-    color: "#ff6b6b",
-    marginBottom: 5,
-  },
-  motivoRechazoText: {
-    fontSize: 14,
-    color: "#ffffff",
-    lineHeight: 20,
-  },
-  solicitarReactivacionButton: {
-    backgroundColor: "rgba(216, 56, 245, 0.8)",
-    padding: 15,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  solicitarReactivacionText: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  solicitudPendienteContainer: {
-    backgroundColor: "rgba(74, 222, 128, 0.2)",
-    padding: 15,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "rgba(74, 222, 128, 0.5)",
-  },
-  solicitudPendienteText: {
-    color: "#4ade80",
-    fontSize: 14,
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  estadoRechazado: {
-    backgroundColor: "rgba(239, 68, 68, 0.2)",
-    borderColor: "#ef4444",
   },
 })
