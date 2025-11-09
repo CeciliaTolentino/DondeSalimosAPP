@@ -34,7 +34,7 @@ export default function Login() {
 
   const [showRegistrationForm, setShowRegistrationForm] = useState(false)
   const [isBarOwner, setIsBarOwner] = useState(false)
-  const [areaCode, setAreaCode] = useState("+54")
+  
   const [comercioData, setComercioData] = useState({
     ID_TipoComercio: 1,
     Nombre: "",
@@ -212,7 +212,7 @@ export default function Login() {
       console.log("Error al registrar:", error)
       Alert.alert("Error", "No se pudo completar el registro. Por favor, intente de nuevo.")
     }
-  }, [isBarOwner, comercioData, areaCode, autenticacionConGoogle,   navigation])
+  }, [isBarOwner, comercioData,  autenticacionConGoogle,   navigation])
 
   if (isLoading) {
     return (
@@ -543,16 +543,7 @@ const styles = StyleSheet.create({
     height: 24,
     marginRight: 12,
   },
-  areaCodePicker: {
-    width: 150,
-    height: 50,
-    borderWidth: 2,
-    borderColor: "rgba(139, 92, 246, 0.3)", // Borde más transparente
-    borderRadius: 10,
-    marginRight: 10,
-    backgroundColor: "rgba(26, 26, 46, 0.4)", // Fondo oscuro con transparencia
-    color: "#e8e8e8", // Texto claro
-  },
+
   phoneInput: {
     flex: 1,
     borderWidth: 2,

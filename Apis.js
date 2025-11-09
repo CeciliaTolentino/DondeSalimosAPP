@@ -44,7 +44,7 @@ apiClient.interceptors.request.use(
     } catch (error) {
       console.error(" Error getting JWT token:", error)
     }
-    console.log(" Final headers:", JSON.stringify(config.headers))
+  //  console.log(" Final headers:", JSON.stringify(config.headers))
     return config
   },
   (error) => {
@@ -347,7 +347,19 @@ const actualizarComercio = async (idComercio, comercioData) => {
     throw error
   }
 }
+const obtenerComerciosPorUsuario = async (usuarioID) => {
+  try {
+    const headers = await getAuthHeaders()
+    console.log(" Actualizando comercio con JWT")
 
+    const response = await apiClient.get(`/api/Comercios/buscarComerciosPorUsuario/${usuarioID}`, { headers })
+    
+    return response
+  } catch (error) {
+    console.error(" Error al actualizar comercio:", error.response?.data || error.message)
+    throw error
+  }
+}
 const eliminarComercio = async (idComercio) => {
   try {
     const headers = await getAuthHeaders()
@@ -649,6 +661,8 @@ const body = {
     throw error
   }
 }
+
+
 export default {
   obtenerPublicidadesListado,
   obtenerPublicidadesPorNombreComercio,
@@ -682,5 +696,8 @@ incrementarVisualizacion,
 authenticatedFetch,
 obtenerUsuarios,
 actualizarEstadoUsuario,
-actualizardatosUsuario
+actualizardatosUsuario,
+
+  obtenerComerciosPorUsuario, 
+ 
 }
