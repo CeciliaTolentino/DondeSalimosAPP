@@ -36,8 +36,8 @@ apiClient.interceptors.request.use(
           config.headers = {}
         }
         config.headers["Authorization"] = `Bearer ${token}`
-        console.log(" JWT token added to request")
-        console.log(" Authorization header:", config.headers["Authorization"])
+       // console.log(" JWT token added to request")
+     //   console.log(" Authorization header:", config.headers["Authorization"]) descomentar si necesitamos un jwt
       } else {
         console.log(" No JWT token found in AsyncStorage")
       }
@@ -142,7 +142,23 @@ try {
     console.log(" Reserva creada exitosamente")
     return response
   } catch (error) {
-    console.error(" Error al crear reserva:", error.response?.data || error.message)
+    const errorMsg = error.response?.data
+    if (errorMsg && typeof errorMsg === 'string') {
+      const isControlledError = 
+         errorMsg.toLowerCase().includes('inactiv') || // Cubre "inactivo" e "inactiva"
+        errorMsg.toLowerCase().includes('desactivado') ||
+        errorMsg.toLowerCase().includes('disponible') ||
+        errorMsg.toLowerCase().includes('pendiente de aprobación') || // Nuevo: reserva pendiente
+        errorMsg.toLowerCase().includes('reserva aprobada') || // Nuevo: reserva ya aprobada
+        errorMsg.toLowerCase().includes('seleccione otra fecha') // Nuevo: mensaje de fecha
+      
+      
+      if (!isControlledError) {
+        console.error(" Error inesperado al crear reserva:", errorMsg)
+      }
+    } else if (error.message) {
+      console.error(" Error inesperado al crear reserva:", error.message)
+    }
     throw error
   }
 }
@@ -243,7 +259,25 @@ const crearResenia = async (reseniaData) => {
     console.log("✅ Reseña creada exitosamente:", response.data)
     return response
   } catch (error) {
-    console.error("❌ Error al crear reseña:", error.response?.data || error.message)
+    const errorMsg = error.response?.data
+    
+    if (errorMsg && typeof errorMsg === 'string') {
+      const isControlledError = 
+        errorMsg.toLowerCase().includes('inactiv') || // Cubre "inactivo" e "inactiva"
+        errorMsg.toLowerCase().includes('desactivado') ||
+        errorMsg.toLowerCase().includes('reserva aprobada') ||
+        errorMsg.toLowerCase().includes('sin reserva') ||
+        errorMsg.toLowerCase().includes('ya tienes una reseña') ||
+        errorMsg.toLowerCase().includes('reseña pendiente') ||
+        errorMsg.toLowerCase().includes('reseña aprobada') ||
+        errorMsg.toLowerCase().includes('comercio no existe')
+      
+      if (!isControlledError) {
+        console.error("❌ Error inesperado al crear reseña:", errorMsg)
+      }
+    } else if (error.message) {
+      console.error("❌ Error inesperado al crear reseña:", error.message)
+    }
     throw error
   }
 }
@@ -329,7 +363,12 @@ const crearComercio = async (comercioData) => {
     console.log(" Comercio creado exitosamente")
     return response
   } catch (error) {
-    console.log(" Error al crear comercio:", error.response?.data || error.message)
+    
+    console.log("Error response data:", error.response?.data)
+    console.log("Error response data type:", typeof error.response?.data)
+    
+    // Solo log el error, el manejo se hace en BarManagement.tsx
+    console.log("Error al crear comercio:", error.response?.data || error.message)
     throw error
   }
 }
@@ -631,7 +670,18 @@ const body = {
     console.log(" Estado de usuario actualizado exitosamente")
     return response
   } catch (error) {
-    console.error(" Error al actualizar estado de usuario:", error.response?.data || error.message)
+   const errorMsg = error.response?.data
+    if (errorMsg && typeof errorMsg === 'string') {
+      const isControlledError = 
+        errorMsg.includes('palabras no permitidas') || 
+        errorMsg.includes('nombre de usuario ya está en uso')
+      
+      if (!isControlledError) {
+        console.error(" Error inesperado al actualizar estado de usuario:", errorMsg)
+      }
+    } else {
+      console.error(" Error inesperado al actualizar estado de usuario:", error.message)
+    }
     throw error
   }
 }
@@ -657,7 +707,18 @@ const body = {
     console.log(" Estado de usuario actualizado exitosamente")
     return response
   } catch (error) {
-    console.error(" Error al actualizar estado de usuario:", error.response?.data || error.message)
+  const errorMsg = error.response?.data
+    if (errorMsg && typeof errorMsg === 'string') {
+      const isControlledError = 
+        errorMsg.includes('palabras no permitidas') || 
+        errorMsg.includes('nombre de usuario ya está en uso')
+      
+      if (!isControlledError) {
+        console.error(" Error inesperado al actualizar estado de usuario:", errorMsg)
+      }
+    } else {
+      console.error(" Error inesperado al actualizar estado de usuario:", error.message)
+    }
     throw error
   }
 }

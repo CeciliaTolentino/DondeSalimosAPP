@@ -393,8 +393,55 @@ const ReservationModal = ({ visible, onClose, comercio }) => {
         ],
       )
     } catch (error) {
-      console.error("Error al crear reserva:", error)
-      Alert.alert("Error", "No se pudo crear la reserva. Por favor intenta nuevamente.")
+      
+      if (error.response?.status === 400) {
+        const errorMessage = error.response?.data
+        
+        // Usuario inactivo o desactivado
+        if (errorMessage?.includes("inactivo") || errorMessage?.includes("desactivado")) {
+          Alert.alert(
+            "Cuenta Desactivada",
+            "Tu cuenta ha sido desactivada. Por favor, contacta al administrador o solicita la reactivación desde tu perfil para poder realizar reservas.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // Comercio inactivo
+        else if (errorMessage?.includes("comercio") && errorMessage?.includes("inactivo")) {
+          Alert.alert(
+            "Comercio No Disponible",
+            "Este comercio no está disponible para reservas en este momento.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // Reserva duplicada
+        else if (errorMessage?.includes("duplicada") || errorMessage?.includes("ya existe una reserva")) {
+          Alert.alert(
+            "Reserva Duplicada",
+            "Ya tienes una reserva para este comercio con la misma fecha, hora y cantidad de comensales. Por favor, verifica tus reservas existentes.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // Error genérico de validación
+        else {
+          Alert.alert(
+            "Error de Validación",
+            errorMessage || "No se pudo crear la reserva. Verifica los datos ingresados.",
+            [{ text: "Entendido" }]
+          )
+        }
+      } else if (error.response?.status === 404) {
+        Alert.alert(
+          "Error",
+          "No se encontró el usuario o el comercio. Por favor, intenta nuevamente.",
+          [{ text: "Entendido" }]
+        )
+      } else {
+        Alert.alert(
+          "Error",
+          "No se pudo crear la reserva. Intenta nuevamente más tarde.",
+          [{ text: "Entendido" }]
+        )
+      }
     } finally {
       setIsLoading(false)
     }

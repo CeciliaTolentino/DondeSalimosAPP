@@ -30,9 +30,13 @@ const PlaceIcon = ({ tipo }) => {
 const getRelativeTime = (date) => {
   const now = new Date()
   const past = new Date(date)
-  const diffInMs = now - past
-  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
+ const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const pastDate = new Date(past.getFullYear(), past.getMonth(), past.getDate())
 
+  const diffInMs = nowDate - pastDate
+  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
+// If date is in the future, return appropriate message
+  if (diffInDays < 0) return "Próximamente"
   if (diffInDays === 0) return "Hoy"
   if (diffInDays === 1) return "Ayer"
   if (diffInDays < 7) return `Hace ${diffInDays} días`
@@ -460,6 +464,8 @@ export default function Profile() {
               estado: p.estado,
               fechaCreacion: new Date(p.fechaCreacion),
               fechaExpiracion: p.fechaExpiracion ? new Date(p.fechaExpiracion) : null,
+              imagenUrl: p.imagenUrl
+              
             }
           })
 
@@ -470,13 +476,18 @@ export default function Profile() {
       }
 
       setPublicidades(allPublicidades)
-      console.log(" ✅ Publicidades cargadas:", allPublicidades.length)
+      console.log("Publicidades cargadas:", allPublicidades.length)
     } catch (error) {
       console.error(" Error al cargar publicidades:", error)
       setPublicidades([])
     }
   }
   const loadUserReseñas = async () => {
+     if (!user?.estado) {
+    console.log("Usuario desactivado, no se cargan reseñas")
+    setReseñas([])
+    return
+  }
     try {
       const response = await Apis.obtenerResenias()
       if (response.data) {
@@ -507,7 +518,21 @@ export default function Profile() {
     try {
       const response = await Apis.obtenerReservasListado()
       if (response.data) {
-        const userReservas = response.data.filter((r) => r.iD_Usuario == user.iD_Usuario)
+         const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+           const userReservas = response.data.filter(
+       (r) => {
+            if (r.iD_Usuario !== user.iD_Usuario || r.estado !== true) {
+              return false
+            }
+            
+            const reservaDate = new Date(r.fechaReserva)
+            const reservaDay = new Date(reservaDate.getFullYear(), reservaDate.getMonth(), reservaDate.getDate())
+            
+            // Solo incluir si la reserva es hoy o en el pasado
+            return reservaDay <= today
+          }
+        )
 
         const lugaresMap = new Map()
 
@@ -536,7 +561,7 @@ export default function Profile() {
 
         const lugaresArray = Array.from(lugaresMap.values())
         setLugaresVisitados(lugaresArray)
-        console.log(" ✅ Lugares visitados cargados:", lugaresArray.length)
+        console.log("Lugares visitados cargados:", lugaresArray.length)
       }
     } catch (error) {
       console.error(" Error al cargar lugares visitados:", error)
@@ -554,7 +579,9 @@ export default function Profile() {
       if (reseñasResponse.data && reservasResponse.data) {
         const userReseñas = reseñasResponse.data.filter((r) => r.iD_Usuario == user.iD_Usuario && r.estado === true)
 
-        const userReservas = reservasResponse.data.filter((r) => r.iD_Usuario == user.iD_Usuario)
+        const userReservas = reservasResponse.data.filter(
+          (r) => r.iD_Usuario == user.iD_Usuario && r.estado === true
+        )
         const uniquePlaces = new Set(userReservas.map((r) => r.iD_Comercio))
 
         setUserStats({
@@ -587,7 +614,7 @@ export default function Profile() {
     }
 
     try {
-      console.log(" 📡 Llamando a obtenerReservasListado...")
+      console.log("Llamando a obtenerReservasListado...")
       console.log(" URL:", `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/Reservas/listado`)
       console.log(" Método: GET")
 
@@ -607,7 +634,7 @@ export default function Profile() {
 
       const reservasResponse = await Apis.obtenerReservasListado()
 
-      console.log(" ✅ Respuesta recibida, status:", reservasResponse.status)
+      console.log("Respuesta recibida, status:", reservasResponse.status)
       console.log(" Datos recibidos:", reservasResponse.data?.length || 0, "reservas")
 
       const userReservas = reservasResponse.data.filter((reserva) => comercioIds.includes(reserva.iD_Comercio))
@@ -629,9 +656,9 @@ export default function Profile() {
       })
 
       setReservasRecibidas(formattedReservas)
-      console.log("✅ Reservas recibidas cargadas:", formattedReservas.length)
+      console.log("Reservas recibidas cargadas:", formattedReservas.length)
     } catch (error) {
-      console.error(" ❌ Error al cargar reservas del comercio:", {
+      console.error("Error al cargar reservas del comercio:", {
         error: error.message || "Unknown error",
         response: error.response?.data,
         status: error.response?.status,
@@ -695,13 +722,11 @@ export default function Profile() {
     }
   }, [user])
 
-  const handleEdit = () => {
-    setIsEditing(true)
-  }
+ 
   const handleSolicitarReactivacion = async () => {
     Alert.alert(
       "Solicitar Reactivación",
-      "¿Desea solicitar la reactivación de su cuenta? El administrador revisará su solicitud.",
+      "¿Desea solicitar la reactivación de su cuenta?",
       [
         { text: "Cancelar", style: "cancel" },
         {
@@ -717,10 +742,7 @@ export default function Profile() {
 
               await Apis.actualizardatosUsuario(updatedUser)
 
-              Alert.alert(
-                "Solicitud Enviada",
-                "Su solicitud de reactivación ha sido enviada al administrador. Recibirá una notificación cuando sea procesada.",
-              )
+           
 
               // Actualizar el contexto local
               const updatedUserFromBackend = await buscarUsuarioPorId(user.iD_Usuario)
@@ -755,7 +777,7 @@ export default function Profile() {
       const updateData = {
         iD_Usuario: user.iD_Usuario,
         nombreUsuario: editedUser.nombreUsuario.trim(),
-        telefono: phoneNumber, // Use phoneNumber state
+        telefono: phoneNumber,
         correo: user.correo,
         uid: user.uid,
         estado: true,
@@ -782,13 +804,44 @@ export default function Profile() {
 
       setIsEditing(false)
       Alert.alert("Éxito", "Perfil actualizado correctamente")
-    } catch (error) {
-      console.error("Error al actualizar el perfil:", error)
-      Alert.alert("Error", "No se pudo actualizar el perfil. Por favor, intente de nuevo.")
+    } catch (err) {
+      let errorMessage = "No se pudo actualizar el perfil. Por favor, intente de nuevo."
+      
+      if (err.response?.data) {
+        const errorData = err.response.data
+        
+        if (typeof errorData === "string" && errorData.includes("palabras no permitidas")) {
+          errorMessage = "El nombre de usuario contiene palabras no permitidas. Por favor, elija otro nombre."
+        }
+        else if (typeof errorData === "string" && errorData.includes("nombre de usuario ya está en uso")) {
+          errorMessage = "El nombre de usuario ya está en uso. Por favor, elija otro nombre."
+        }
+        // Otros errores de validación
+        else if (errorData.errors) {
+          const firstError = Object.values(errorData.errors)[0]
+          if (Array.isArray(firstError) && firstError.length > 0) {
+            errorMessage = firstError[0]
+          }
+        }
+        // Mensaje genérico del backend
+        else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+        // Only log unexpected errors to console
+        else {
+          console.error("Error inesperado al actualizar datos de usuario:", errorData)
+        }
+      } else {
+        // Only log unexpected errors to console
+        console.error("Error al actualizar el perfil:", err)
+      }
+      
+      Alert.alert("Error", errorMessage)
     } finally {
       setIsLoading(false)
     }
   }
+
 
   const handleCancel = () => {
     setEditedUser({
@@ -805,120 +858,17 @@ export default function Profile() {
     setIsEditing(false)
   }
 
-  // HandleSaveProfile for bar owners, similar to handleSave for regular users
-  const handleSaveProfile = async () => {
-    if (!editedUser.nombreUsuario.trim()) {
-      Alert.alert("Error", "El nombre de usuario es obligatorio")
-      return
-    }
 
-    // Basic phone number validation
-    if (editedUser.telefono && editedUser.telefono.length !== 10) {
-      Alert.alert("Error", "El número de teléfono debe tener 10 dígitos")
-      return
-    }
-
-    setIsLoading(true)
-    try {
-      const updateData = {
-        iD_Usuario: user.iD_Usuario,
-        nombreUsuario: editedUser.nombreUsuario.trim(),
-        telefono: editedUser.telefono,
-        correo: user.correo, // Keep existing email
-        uid: user.uid,
-        estado: user.estado,
-        fechaCreacion: user.fechaCreacion,
-        iD_RolUsuario: user.iD_RolUsuario,
-      }
-
-      await Apis.actualizardatosUsuario(updateData)
-
-      const refreshedUser = await buscarUsuarioPorId(user.iD_Usuario)
-      if (refreshedUser) {
-        updateAuth(refreshedUser, true) // Update context
-      }
-
-      setIsEditing(false)
-      Alert.alert("Éxito", "Perfil actualizado correctamente")
-    } catch (error) {
-      console.error("Error updating profile:", error)
-      Alert.alert("Error", "No se pudo actualizar el perfil. Por favor, intente de nuevo.")
-    } finally {
-      setIsLoading(false)
-    }
-  }
+ 
 
 
-const eliminarUsuarioConCascada = async () => {
-  try {
-    const tipoUsuario = user.iD_RolUsuario === 3 ? "comercio" : "comun"
-    
-    Alert.alert(
-      "Confirmar eliminación",
-      "¿Está seguro que desea eliminar su perfil? Esta acción no se puede deshacer.",
-      [
-        {
-          text: "Cancelar",
-          style: "cancel",
-        },
-        {
-          text: "Eliminar",
-          style: "destructive",
-          onPress: async () => {
-            setIsLoading(true)
-            try {
-              await Apis.eliminarUsuarioEnCascada(user.iD_Usuario, tipoUsuario)
-              Alert.alert("Perfil eliminado", "Su perfil ha sido eliminado exitosamente.")
-            } catch (error) {
-              console.log("Error al eliminar perfil:", error)
-              Alert.alert("Error", "No se pudo eliminar el perfil. Por favor, intente de nuevo.")
-            } finally {
-              setIsLoading(false)
-            }
-          },
-        },
-      ],
-    )
-  } catch (error) {
-    console.log("Error al verificar comercios:", error)
-    Alert.alert("Error", "No se pudo verificar sus comercios. Por favor, intente de nuevo.")
-  }
-}
 
   const handleRefreshHistory = () => {
     loadUserReseñas()
     loadLugaresVisitados()
   }
 
-  const handleRefreshUserData = async () => {
-    setRefreshing(true)
-    try {
-      if (user?.iD_Usuario) {
-        const refreshedUser = await buscarUsuarioPorId(user.iD_Usuario)
-        if (refreshedUser) {
-          updateAuth(refreshedUser, true)
-        }
 
-        if (isAdmin) {
-          await loadAdminStats()
-        } else if (isBarOwner) {
-          await loadComercioStats()
-          await loadReseñasRecibidas()
-          await loadPublicidades()
-          await loadReservasRecibidas()
-        } else {
-          await loadUserStats()
-          await loadUserReseñas()
-          await loadLugaresVisitados()
-        }
-      }
-    } catch (error) {
-      console.error("Error al refrescar datos del usuario:", error)
-      Alert.alert("Error", "No se pudieron actualizar los datos.")
-    } finally {
-      setRefreshing(false)
-    }
-  }
 
   const handleEditReview = (reseña) => {
     setSelectedReviewToEdit(reseña)
@@ -1155,7 +1105,9 @@ const handleDeleteAccountRequest = () => {
         {user && !user.estado && (
           <View style={styles.desactivadoBanner}>
             <Text style={styles.desactivadoTitle}>⚠️ Cuenta Desactivada</Text>
-            <Text style={styles.desactivadoText}>Su cuenta ha sido desactivada por el administrador.</Text>
+            <Text style={styles.desactivadoText}>
+              Tu cuenta ha sido temporalmente desactivada por inactividad. No te preocupes, puedes reactivarla fácilmente para seguir disfrutando de nuestra app.
+            </Text>
             {user.motivoRechazo && (
               <View style={styles.motivoRechazoContainer}>
                 <Text style={styles.motivoRechazoLabel}>Motivo:</Text>

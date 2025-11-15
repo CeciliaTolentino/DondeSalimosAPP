@@ -35,18 +35,16 @@ const ComercioCard = ({ comercio, onPress }) => {
   }
 
   const getImageSource = () => {
-    console.log(`DEBUG - ComercioCard para: ${comercio.nombre}`)
-    console.log(`DEBUG - comercio.foto existe: ${!!comercio.foto}`)
-    console.log(`DEBUG - comercio.foto length: ${comercio.foto?.length || 0}`)
+    
 
     if (comercio.foto) {
-      console.log(`DEBUG - Primeros 50 caracteres de foto: ${comercio.foto.substring(0, 50)}`)
+     
       const imageUri = convertBase64ToImage(comercio.foto)
-      console.log(`DEBUG - Imagen URI generada: ${imageUri ? imageUri.substring(0, 50) + "..." : "null"}`)
+     
       return { uri: imageUri }
     }
 
-    console.log(`DEBUG - ${comercio.nombre} - No tiene foto, usando placeholder`)
+   
  return require("../../assets/placeholder.jpg")
   }
 
@@ -78,7 +76,7 @@ const ComercioCard = ({ comercio, onPress }) => {
   )
 }
 
-const BarManagement = ({ navigation }) => {
+const BarManagement = () => {
   const { user, isAuthenticated, isBarOwner } = useContext(AuthContext)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -114,7 +112,7 @@ const BarManagement = ({ navigation }) => {
     Correo: "",
     Telefono: "",
   })
-  const [areaCode, setAreaCode] = useState("+54")
+
   const [newComercioImage, setNewComercioImage] = useState(null)
   const [newComercioImageBase64, setNewComercioImageBase64] = useState(null)
 const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
@@ -436,14 +434,16 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
     setIsSaving(true)
     try {
-      console.log("DEBUG - Estados antes de guardar:")
-      console.log("openingHours:", openingHours)
-      console.log("closingHours:", closingHours)
-      const cleanTipoDocumento = selectedComercio.tipoDocumento.replace(/\s+/g, "")
-      const cleanTelefono = selectedComercio.telefono.replace(/\s+/g, "") // Remover espacios
-      const cleanNroDocumento = selectedComercio.nroDocumento.replace(/-/g, "") // Remover guiones para validar
+     
+      const isApproved = selectedComercio.estado === true
+      const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
 
-      if (cleanTipoDocumento === "CUIT") {
+      const cleanTipoDocumento = selectedComercio.tipoDocumento.replace(/\s+/g, "")
+      const cleanTelefono = selectedComercio.telefono.replace(/\s+/g, "") 
+      const cleanNroDocumento = selectedComercio.nroDocumento.replace(/-/g, "") 
+
+     // Solo validar CUIT si el comercio NO está aprobado
+      if (!isApproved && cleanTipoDocumento === "CUIT") {
         const cuitValidation = validateCUIT(cleanNroDocumento)
         if (!cuitValidation.valid) {
           Alert.alert("Error de validación", cuitValidation.message)
@@ -451,23 +451,20 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           return
         }
       }
- const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
+
  //Formatear horarios correctamente, devolviendo null si están vacíos
       const horaIngresoFormatted = formatTimeWithSeconds(openingHours)
       const horaCierreFormatted = formatTimeWithSeconds(closingHours)
 
-      // DEBUG - Horarios formateados:
-      console.log("DEBUG - Horarios formateados:")
-      console.log("horaIngresoFormatted:", horaIngresoFormatted)
-      console.log("horaCierreFormatted:", horaCierreFormatted)
+    
       const updatedComercio = {
         iD_Comercio: selectedComercio.iD_Comercio,
         nombre: nombre.trim(),
         capacidad: Number.parseInt(capacidad) || 0,
         mesas: Number.parseInt(mesas) || 0,
         generoMusical: generoMusical.trim(),
-        tipoDocumento: cleanTipoDocumento,
-        nroDocumento: cleanTipoDocumento === "CUIT" ? formatCUIT(cleanNroDocumento) : cleanNroDocumento,
+        tipoDocumento: selectedComercio.tipoDocumento,
+        nroDocumento: selectedComercio.nroDocumento,
         direccion: direccion.trim(),
         correo: selectedComercio.correo,
         telefono: cleanTelefono,
@@ -1011,10 +1008,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         iD_TipoComercio: newComercioData.ID_TipoComercio,
       }
 
-      console.log("DEBUG - Objeto completo a enviar:", {
-        ...comercioDataToSend,
-        foto: comercioDataToSend.foto ? `[Base64 string of length: ${comercioDataToSend.foto.length}]` : "No image",
-      })
+    
 
       const response = await Apis.crearComercio(comercioDataToSend)
 
@@ -1036,21 +1030,42 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         throw new Error("Error al crear comercio")
       }
     } catch (error) {
-	  
+	   
       let errorMessage = "No se pudo crear el comercio."
 
       if (error.response?.data) {
         const errorData = error.response.data
-
-        // Error de validación de correo del backend
-        if (errorData.errors?.Correo) {
-          errorMessage = "El correo electrónico es inválido. Por favor, verifique el formato (ejemplo@dominio.com)"
+  
+      
+        
+        // Error de validación de correo del backend - dominio no permitido
+        if (errorData.correo) {
+          errorMessage = Array.isArray(errorData.correo)
+            ? errorData.correo[0]
+            : errorData.correo
         }
-        // Error de CUIT duplicado - detectar en message o en el string de error
+        // Error de validación de correo en errors
+        else if (errorData.errors?.correo) {
+           const correoError = Array.isArray(errorData.errors.correo)
+            ? errorData.errors.correo[0]
+            : errorData.errors.correo
+          
+          errorMessage = `${correoError}\n\nDominios aceptados:\n• gmail.com\n• hotmail.com\n• outlook.com\n• yahoo.com\n• live.com\n• *.edu.ar (instituciones educativas)`
+        }
+        else if (typeof errorData === 'string') {
+          // Si el mensaje es sobre CUIT
+          if (errorData.includes('CUIT')) {
+            errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
+          } 
+          // Si no es específico, usar el mensaje del backend
+          else {
+            errorMessage = errorData
+          }
+        }
+        // Error de CUIT duplicado 
         else if (
           errorData.message?.includes("CUIT") ||
-          errorData.title?.includes("CUIT") ||
-          (typeof errorData === "string" && errorData.includes("CUIT"))
+          errorData.title?.includes("CUIT")
         ) {
           errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
         }
@@ -1066,14 +1081,14 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           errorMessage = errorData.message
         }
       }
-      // Si el error es un string directo (como "Existe comercio con el mismo CUIT")
+      // Si el error es un string directo
       else if (typeof error.message === "string" && error.message.includes("CUIT")) {
         errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
       }
 
       Alert.alert(
         "Error al registrar comercio",
-        errorMessage + "\n\nPor favor, corrija los datos y vuelva a intentar.",
+        errorMessage,
         [{ text: "Entendido" }],
       )
     } finally {
@@ -1445,7 +1460,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
                 style={styles.editInput}
                 value={openingHours} // Use openingHours state for editing
                 onChangeText={(text) => {
-                  console.log("DEBUG - Horario de apertura cambiado a:", text)
+                
                   setOpeningHours(text)
                 }}
                 placeholder="ej: 18:00"
@@ -1459,7 +1474,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
                 style={styles.editInput}
                 value={closingHours} // Use closingHours state for editing
                 onChangeText={(text) => {
-                  console.log("DEBUG - Horario de cierre cambiado a:", text)
+                 
                   setClosingHours(text)
                 }}
                 placeholder="ej: 02:00"
@@ -1614,7 +1629,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             style={styles.editInput}
             value={newComercioHoraIngreso}
             onChangeText={(text) => {
-              console.log("DEBUG - Horario de apertura cambiado a:", text)
+             
               setNewComercioHoraIngreso(text)
             }}
             placeholder="ej: 18:00"
@@ -1628,7 +1643,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             style={styles.editInput}
             value={newComercioHoraCierre}
             onChangeText={(text) => {
-              console.log("DEBUG - Horario de cierre cambiado a:", text)
+            
               setNewComercioHoraCierre(text)
             }}
             placeholder="ej: 02:00"

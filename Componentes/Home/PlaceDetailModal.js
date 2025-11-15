@@ -236,21 +236,16 @@ const SharePlace = async (place) => {
   const loadReviews = async () => {
     try {
       if (!place?.comercioData?.nombre || !place?.comercioData?.iD_Comercio) return
-      console.log(
-        "[v0] Cargando reseñas para comercio ID:",
-        place.comercioData.iD_Comercio,
-        "Nombre:",
-        place.comercioData.nombre,
-      )
+    
       const response = await Apis.obtenerReseniasPorComercio(place.comercioData.nombre)
 
-      console.log("[v0] Total reviews received from API:", response.data.length)
+      
 
       const reviewsForThisPlace = response.data.filter((r) => r.iD_Comercio === place.comercioData.iD_Comercio)
-      console.log("[v0] Reviews after filtering by comercio ID:", reviewsForThisPlace.length)
+      
 
       const approvedReviews = reviewsForThisPlace.filter((r) => r.estado === true)
-      console.log("[v0] Approved reviews count:", approvedReviews.length)
+     
 
       setReviews(approvedReviews)
 
@@ -260,16 +255,16 @@ const SharePlace = async (place) => {
           const totalRating = reviewsWithRating.reduce((sum, review) => sum + review.puntuacion, 0)
           const avg = totalRating / reviewsWithRating.length
           setAverageRating(avg)
-          console.log("[v0] Promedio de puntuación:", avg.toFixed(1), "de", reviewsWithRating.length, "reseñas")
+         
         } else {
           setAverageRating(0)
-          console.log("[v0] No hay reseñas con puntuación todavía")
+          
         }
       } else {
         setAverageRating(0)
       }
 
-      console.log("[v0] Reseñas finales cargadas:", approvedReviews.length)
+     
     } catch (error) {
       console.error("❌ Error al cargar reseñas:", error)
       setReviews([])
@@ -369,14 +364,25 @@ const renderStars = (rating) => {
 
   const renderPlaceDetails = (place) => {
     if (!place) {
-      console.log("⚠️ Place is null or undefined, returning null")
+      console.log("Place is null or undefined, returning null")
       return null
     }
 
     try {
-      console.log("🎨 Renderizando detalles del lugar:", place.name)
-      console.log("🎨 isBarOwner value:", isBarOwner, "type:", typeof isBarOwner)
-
+      console.log("Renderizando detalles del lugar:", place.name)
+      console.log("isBarOwner value:", isBarOwner, "type:", typeof isBarOwner)
+ const isBailableBar = () => {
+        // Para comercios locales: es bar (tipo 1) y tiene género musical
+        if (place.isLocal) {
+          
+          return false
+        }
+        // Para lugares de Google: es bar y aparece cuando se buscan boliches (considerado bailable)
+        if (!place.isLocal && place.types?.includes("bar") && place.types?.includes("night_club")) {
+          return true
+        }
+        return false
+      }
       return (
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <TouchableOpacity style={styles.closeButton} onPress={handleClose} activeOpacity={0.7}>
@@ -396,7 +402,11 @@ const renderStars = (rating) => {
           <Text numberOfLines={2} style={styles.name}>
             {safeString(place.name, "Nombre no disponible")}
           </Text>
-
+ {isBailableBar() && (
+            <View style={styles.bailableBadgeContainer}>
+              <Text style={styles.bailableBadgeText}>🎵 Bar Bailable</Text>
+            </View>
+          )}
           <Image
             source={getImageSource()}
             style={styles.image}
@@ -674,7 +684,7 @@ const styles = StyleSheet.create({
   },
   reviewButtonText: {
     color: "white",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "bold",
     marginLeft: 10,
   },
@@ -936,7 +946,30 @@ const styles = StyleSheet.create({
     color: "#333",
     fontWeight: "600",
   },
-
+bailableBadgeContainer: {
+    backgroundColor: "rgba(209, 141, 211, 0.85)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignSelf: "center",
+    marginTop: 8,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: "#e93bda96",
+    shadowColor: "#c7bad3a1",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  bailableBadgeText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
 })
 
 export default PlaceDetailModal

@@ -127,13 +127,7 @@ export default function PublicidadModal({
 
   const handleConfirm = async () => {
    // if (!isEditingRejectedPaid && !selectedDuration) {
-   console.log("[v0] handleConfirm called with:", {
-      isRejectedUnpaid,
-      isEditingRejectedPaid,
-      selectedDuration: selectedDuration?.label,
-      hasImage: !!imageBase64,
-      comercioId: comercio?.iD_Comercio,
-    })
+   
 
     if (!isEditingRejectedPaid && !isRejectedUnpaid && !selectedDuration) {
       Alert.alert("Error", "Por favor selecciona una duración para la publicidad.")

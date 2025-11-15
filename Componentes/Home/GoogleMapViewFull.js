@@ -232,29 +232,37 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
     }
 
     const typesArray = selectedTypes.split(",").filter((t) => t.trim())
+    const selectedGenres = onSearch?.selectedGenres?.split(",").filter((g) => g.trim()) || []
 
     return places.filter((place) => {
-      // Para lugares de Google, usar el array types
       if (!place.isLocal && place.types) {
         // Si solo se seleccionó "bar", excluir night_clubs
         if (typesArray.includes("bar") && !typesArray.includes("night_club")) {
           return place.types.includes("bar") && !place.types.includes("night_club")
         }
-        // Si solo se seleccionó "night_club", excluir bars
+        
+        // Si solo se seleccionó "night_club", ser más inteligente
         if (typesArray.includes("night_club") && !typesArray.includes("bar")) {
-        //  return place.types.includes("night_club") && !place.types.includes("bar")
-        const hasBarInName = place.name?.toLowerCase().includes("bar")
+          const hasBarInName = place.name?.toLowerCase().includes("bar")
           const hasBarInTypes = place.types.includes("bar")
           const isNightClub = place.types.includes("night_club")
 
-          // Excluir si tiene "bar" en el nombre O en los tipos, a menos que sea claramente un boliche
+          if (place.isLocal && place.generoMusical) {
+            return true // Es un bar bailable local
+          }
+
+          if (selectedGenres && selectedGenres.length > 0) {
+            return true // El usuario busca por género, incluir bares bailables
+          }
+
+          // Excluir bares normales (sin música)
           if (hasBarInName || hasBarInTypes) {
-            console.log(`🚫 Excluyendo "${place.name}" - contiene "bar"`)
             return false
           }
 
           return isNightClub
         }
+        
         // Si se seleccionaron ambos, incluir cualquiera
         return place.types.some((type) => typesArray.includes(type))
       }

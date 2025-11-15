@@ -19,7 +19,18 @@ const categoryList = [
   },
 ]
 
-const genres = ["techno", "salsa", "dark", "metal", "cachengue", "cumbia", "rock"]
+const genres = [
+  // Electrónica
+  "techno", "house", "trance", "dubstep", "drum and bass",
+  // Latinos
+  "salsa", "reggaeton", "bachata", "merengue", "cumbia", "cachengue", "trap latino",
+  // Rock y derivados
+  "rock", "punk", "alternativo", "indie rock", "hard rock", "metal",
+  // Urbano
+  "hip hop", "rap", "r&b",
+  // Otros
+  "jazz", "blues", "pop", "folklore", "tango", "dark"
+]
 		   
 		  
 export default function CategoryFilter({ onSearch }) {
@@ -81,11 +92,7 @@ export default function CategoryFilter({ onSearch }) {
 		  
       </View>
       <Text style={styles.categoryText}>{category.name}</Text>
-      {selectedCategories.find((c) => c.id === category.id) && (
-        <View style={styles.selectedCheckmark}>
-          <Text style={styles.checkmarkText}>✓</Text>
-        </View>
-      )}
+      
     </TouchableOpacity>
   )
 
@@ -110,7 +117,7 @@ export default function CategoryFilter({ onSearch }) {
             horizontal={true}
             renderItem={({ item }) => <CategoryItem category={item} />}
             keyExtractor={(item) => item.id.toString()}
-            contentContainerStyle={styles.categoryList}
+           
           />
 
           <Text style={styles.sectionTitle}>Géneros de música:</Text>
@@ -175,7 +182,7 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 10,
     marginTop: 10,
-    maxHeight: 400,
+    maxHeight: 500,
   },
   sectionTitle: {
     fontSize: 18,
@@ -183,10 +190,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontFamily: "roboto_bold",
   },
-  categoryList: {
-    justifyContent: "space-between",
-    paddingHorizontal: 10,
-  },
+ 
   categoryItem: {
     alignItems: "center",
     marginVertical: 10,
@@ -260,6 +264,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 20,
     alignItems: "center",
+     marginBottom: 20,
   },
   searchButtonText: {
     color: "white",
@@ -271,22 +276,5 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontStyle: "italic",
   },
-  selectedCheckmark: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    backgroundColor: "#28a745",
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  checkmarkText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
+ 
 })

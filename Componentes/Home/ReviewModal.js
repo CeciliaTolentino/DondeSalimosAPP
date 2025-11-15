@@ -185,15 +185,77 @@ const ReviewModal = ({ visible, onClose, comercio }) => {
         },
       ])
     } catch (error) {
-      console.error("❌ Error al crear reseña:", error)
-      if (error.response?.status === 400 && error.response?.data?.includes("reserva")) {
+       const errorMessage = error.response?.data
+      const isControlledError = errorMessage && typeof errorMessage === 'string' && (
+        errorMessage.includes("inactivo") || 
+        errorMessage.includes("desactivado") ||
+        errorMessage.includes("reserva aprobada") ||
+        errorMessage.includes("sin reserva") ||
+        errorMessage.includes("ya existe") ||
+        errorMessage.includes("reseña pendiente") ||
+        errorMessage.includes("reseña aprobada") ||
+        errorMessage.includes("reserva")
+      )
+
+      if (!isControlledError) {
+        console.error("❌ Error al crear reseña:", error)
+      }
+
+      if (error.response?.status === 400) {
+        // Usuario inactivo o desactivado
+        
+        // Usuario inactivo o desactivado
+        if (errorMessage?.includes("inactivo") || errorMessage?.includes("desactivado")) {
+          Alert.alert(
+            "Cuenta Desactivada",
+            "Tu cuenta ha sido desactivada. Por favor, contacta al administrador o solicita la reactivación desde tu perfil para poder dejar reseñas.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // No tiene reserva aprobada
+        else if (errorMessage?.includes("reserva aprobada") || errorMessage?.includes("sin reserva")) {
+          Alert.alert(
+            "Reserva Requerida",
+            "No puedes dejar una reseña sin tener una reserva aprobada en este comercio. Por favor, realiza una reserva primero y espera a que sea aprobada.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // Ya existe una reseña aprobada o pendiente
+        else if (errorMessage?.includes("ya existe") || errorMessage?.includes("reseña pendiente") || errorMessage?.includes("reseña aprobada")) {
+          Alert.alert(
+            "Reseña Duplicada",
+            "Ya tienes una reseña aprobada o pendiente para este comercio. Solo puedes crear una nueva reseña si la anterior fue rechazada.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // Error genérico de reserva
+        else if (errorMessage?.includes("reserva")) {
+          Alert.alert(
+            "Reserva Requerida",
+            "No puedes dejar una reseña sin tener una reserva en este comercio. Por favor, realiza una reserva primero.",
+            [{ text: "Entendido" }]
+          )
+        }
+        // Error genérico de validación
+        else {
+          Alert.alert(
+            "Error de Validación",
+            errorMessage || "No se pudo crear la reseña. Verifica los datos ingresados.",
+            [{ text: "Entendido" }]
+          )
+        }
+      } else if (error.response?.status === 404) {
         Alert.alert(
-          "Reserva requerida",
-          "No puedes dejar una reseña sin tener una reserva en este comercio. Por favor, realiza una reserva primero.",
-          [{ text: "Entendido" }],
+          "Error",
+          "No se encontró el usuario o el comercio. Por favor, intenta nuevamente.",
+          [{ text: "Entendido" }]
         )
       } else {
-        Alert.alert("Error", "No se pudo crear la reseña. Intenta nuevamente.")
+        Alert.alert(
+          "Error",
+          "No se pudo crear la reseña. Intenta nuevamente más tarde.",
+          [{ text: "Entendido" }]
+        )
       }
     } finally {
       setIsLoading(false)

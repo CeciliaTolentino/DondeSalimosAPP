@@ -4,40 +4,39 @@ import { Marker } from "react-native-maps"
 
 export default function PlaceMarker({ item, onPress, isSelected }) {
   if (!item || !item.geometry || !item.geometry.location) {
-    console.warn("⚠️ PlaceMarker: Item inválido", item?.name || "sin nombre")
+    console.warn("PlaceMarker: Item inválido", item?.name || "sin nombre")
     return null
   }
 
   const { lat, lng } = item.geometry.location
 
   if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
-    console.warn("⚠️ PlaceMarker: Coordenadas inválidas", { lat, lng, name: item.name })
+    console.warn(" PlaceMarker: Coordenadas inválidas", { lat, lng, name: item.name })
     return null
   }
 
-  console.log("📍 Renderizando marcador:", item.name, { lat, lng, isLocal: item.isLocal })
+  console.log("Renderizando marcador:", item.name, { lat, lng, isLocal: item.isLocal })
 
-  const getMarkerEmoji = () => {
+    const getMarkerEmoji = () => {
     if (item.isLocal) {
-      // Para comercios locales, usar el tipo de comercio
-      return item.comercioData?.iD_TipoComercio === 1 ? "🍺" : "🪩"
+      const isBar = item.comercioData?.iD_TipoComercio === 1
+      return isBar ? "🍺" : "🪩"
     } else {
-      // Para lugares de Google, usar los types
       return item.types?.includes("bar") ? "🍺" : "🪩"
     }
   }
 
-  
+
 
   const handlePress = () => {
     try {
-      console.log("🎯 Marker.onPress iniciado:", item.name)
+      console.log("Marker.onPress iniciado:", item.name)
       if (onPress && typeof onPress === "function") {
         onPress(item)
-        console.log("✅ onPress callback ejecutado")
+        console.log("onPress callback ejecutado")
       }
     } catch (error) {
-      console.error("❌ Error en Marker.onPress:", error)
+      console.error("Error en Marker.onPress:", error)
     }
   }
 
@@ -60,6 +59,7 @@ export default function PlaceMarker({ item, onPress, isSelected }) {
             <Text style={styles.localBadgeText}>★</Text>
           </View>
         )}
+          
       </View>
       
     </Marker>
@@ -105,4 +105,5 @@ const styles = StyleSheet.create({
     color: "#000",
     fontWeight: "bold",
   },
+ 
 })
