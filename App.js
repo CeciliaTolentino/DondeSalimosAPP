@@ -6,10 +6,10 @@ import TabNavigation from "./App/Navigation/TabNavigation"
 import * as Location from "expo-location"
 import { UserLocationContext } from "./App/Context/UserLocationContext"
 import { useFonts } from "expo-font"
-import { AuthProvider } from "./AuthContext"
+import { AuthProvider } from "./Apis/AuthContext"
 
 
-import PantalladeCarga from "./Componentes/PantalladeCarga"
+import LoadingScreen from "./Components/loading/loadingScreen"
 const Stack = createNativeStackNavigator();
 
 
@@ -21,7 +21,7 @@ const AnimatedSplashScreen = ({ navigation }) => {
 
   
 
-  return <PantalladeCarga onFinish={handleLoadingComplete} />
+  return <LoadingScreen onFinish={handleLoadingComplete} />
 }
 
 function App() {
@@ -49,7 +49,7 @@ function App() {
   if (!fontsLoaded) {
     return (
       <View style={styles.container}>
-        <PantalladeCarga />
+        <LoadingScreen />
       </View>
     )
   }

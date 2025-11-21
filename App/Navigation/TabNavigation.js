@@ -4,14 +4,13 @@ import { MaterialIcons } from "@expo/vector-icons"
 import { Alert } from "react-native"
 import { useNavigation } from "@react-navigation/native"
 import HomeNavigation from "./HomeNavigation"
-import Login from "../Pantallas/Login"
-//import Fav from "../Pantallas/Fav"
-import Profile from "../Pantallas/Profile"
-import BarManagement from "../Pantallas/BarManagment"
-import Reservas from '../../Componentes/Home/Reserva'
-import AdminPanel from "../Pantallas/AdminPanel"
-import { AuthContext } from "../../AuthContext"
-import RestrictedAccess from "../Pantallas/RestrictedAccess"
+import Login from "../Screen/Login"
+import Profile from "../Screen/Profile"
+import BarManagement from "../Screen/BarManagment"
+import Reservation from '../../Components/Reservation/Reservation'
+import AdminPanel from "../Screen/AdminPanel"
+import { AuthContext } from "../../Apis/AuthContext"
+import RestrictedAccess from "../Screen/RestrictedAccess"
 
 const Tab = createBottomTabNavigator()
 
@@ -76,7 +75,7 @@ export default function TabNavigation() {
       {isCommonUser && (
         <Tab.Screen
           name="Reservas"
-          component={isRegistered ? Reservas : RestrictedAccess}
+          component={isRegistered ? Reservation : RestrictedAccess}
           listeners={{
             tabPress: (e) => {
               if (!isRegistered) {
@@ -90,11 +89,11 @@ export default function TabNavigation() {
         />
       )}
 
-      {/* Para dueños de bar: Reservas */}
+
       {isBarOwner && (
         <Tab.Screen
           name="Reservas"
-          component={Reservas}
+          component={Reservation}
           options={{
             headerShown: false,
             tabBarLabel: "Reservas",
