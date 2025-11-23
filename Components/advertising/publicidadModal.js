@@ -444,7 +444,7 @@ console.log("Redirigiendo a Mercado Pago:", preferenciaResponse.data?.init_point
                     Serás redirigido a Mercado Pago para completar el pago de forma segura. Podrás pagar con tarjeta de
                     crédito, débito o efectivo.
                   </Text>
-                  <Text style={styles.paymentInfoNote}>(Actualmente en modo de prueba)</Text>
+                 
                 </View>
               </View>
             )}
