@@ -1,4 +1,3 @@
-
 import { useContext, useEffect, useState, useRef, useMemo, useCallback } from "react"
 import { View, Dimensions, StyleSheet, ActivityIndicator } from "react-native"
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps"
@@ -9,14 +8,17 @@ import CategoryFilter from "./CategoryFilter"
 import PlaceDetailModal from "../ManagmentModal/PlaceDetailModal"
 import BarStories from "../Stories/BarStories"
 import Apis from "../../Apis/Apis"
+
+
 export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, onPlaceSelect }) {
   const [mapRegion, setMapRegion] = useState(null)
   const [initialRegion, setInitialRegion] = useState(null)
   const [temporaryPlace, setTemporaryPlace] = useState(null)
   const [mapReady, setMapReady] = useState(false)
-  const [showStories, setShowStories] = useState(false)
   const { location, setLocation } = useContext(UserLocationContext)
   const mapRef = useRef(null)
+
+  const geocodeCache = useRef(new Map())
 
   useEffect(() => {
     if (location) {
@@ -32,12 +34,6 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
   }, [location])
 
   useEffect(() => {
-    if (mapReady) {
-      setTimeout(() => setShowStories(true), 300)
-    }
-  }, [mapReady])
-
-  useEffect(() => {
     if (selectedPlace && mapRef.current) {
       const region = {
         latitude: selectedPlace.geometry.location.lat,
@@ -49,256 +45,209 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
     }
   }, [selectedPlace])
 
-  useEffect(() => {
-   
-   const selectedTypes = onSearch?.selectedTypes || ""
-    const filteredPlaces = filterPlacesByType(placeList, selectedTypes)
-
-    
-
-    filteredPlaces.forEach((place, index) => {
-      console.log(`📍 Lugar ${index + 1}:`, {
-        name: place?.name,
-        isLocal: place?.isLocal,
-        lat: place.geometry?.location?.lat,
-        lng: place.geometry?.location?.lng,
-        hasValidCoords: !!(place.geometry?.location?.lat && place.geometry?.location?.lng),
-      })
-    })
-  }, [placeList])
-
-  const onMarkerPress = (place) => {
-    try {
-      console.log("onMarkerPress iniciado")
-      console.log(
-        "Datos del lugar:",
-        JSON.stringify({
-          name: place?.name,
-          isLocal: place?.isLocal,
-          hasComercioData: !!place?.comercioData,
-        }),
-      )
-
+  const onMarkerPress = useCallback(
+    (place) => {
       onPlaceSelect(place)
-      console.log("onPlaceSelect ejecutado exitosamente")
-    } catch (error) {
-      console.error(" Error en onMarkerPress:", error)
-      console.error("Stack:", error.stack)
-    }
-  }
+    },
+    [onPlaceSelect],
+  )
 
-  const handleModalClose = () => {
+  const handleModalClose = useCallback(() => {
     onPlaceSelect(null)
     setTemporaryPlace(null)
     if (mapRef.current && initialRegion) {
       mapRef.current.animateToRegion(initialRegion, 1000)
     }
-  }
+  }, [initialRegion, onPlaceSelect])
 
-  const handleDirectionClick = (place) => {
-    console.log("Direcciones solicitadas para:", place.name)
-  }
+  const handleDirectionClick = useCallback((place) => {
+    // Direcciones
+  }, [])
 
-  const geocodeAddress = async (address) => {
-    try {
-      const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_URL
-      const encodedAddress = encodeURIComponent(address)
+  const geocodeAddress = useCallback(
+    async (address) => {
+      if (geocodeCache.current.has(address)) {
+        return geocodeCache.current.get(address)
+      }
+
+      try {
+        const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_URL
+        const encodedAddress = encodeURIComponent(address)
         const url = `${baseUrl}/api/GooglePlaces/geocode?address=${encodedAddress}`
 
-      console.log(" Geocoding address:", address)
-      const response = await fetch(url)
-      const data = await response.json()
+        const response = await fetch(url)
+        const data = await response.json()
 
-      if (data.status === "OK" && data.results.length > 0) {
-        const location = data.results[0].geometry.location
-        console.log(`Geocoded: "${address}" -> ${location.lat}, ${location.lng}`)
-        return {
-          lat: location.lat,
-          lng: location.lng,
+        if (data.status === "OK" && data.results.length > 0) {
+          const coords = {
+            lat: data.results[0].geometry.location.lat,
+            lng: data.results[0].geometry.location.lng,
+          }
+          geocodeCache.current.set(address, coords)
+          return coords
+        } else {
+          const defaultCoords = {
+            lat: location ? location.coords.latitude : -34.6118,
+            lng: location ? location.coords.longitude : -58.396,
+          }
+          geocodeCache.current.set(address, defaultCoords)
+          return defaultCoords
         }
-      } else {
-        console.warn(` Geocoding failed for: "${address}" - Status: ${data.status}`)
-        return {
+      } catch (error) {
+        const defaultCoords = {
           lat: location ? location.coords.latitude : -34.6118,
           lng: location ? location.coords.longitude : -58.396,
         }
+        geocodeCache.current.set(address, defaultCoords)
+        return defaultCoords
       }
-    } catch (error) {
-      console.error("Error geocoding address:", address, error)
-      return {
-        lat: location ? location.coords.latitude : -34.6118,
-        lng: location ? location.coords.longitude : -58.396,
-      }
-    }
-  }
+    },
+    [location],
+  )
 
-  const handleStoryPress = async (iD_Comercio) => {
-    try {
-      console.log("handleStoryPress called with iD_Comercio:", iD_Comercio)
-      console.log("placeList length:", placeList.length)
+  const handleStoryPress = useCallback(
+    async (iD_Comercio) => {
+      try {
+        setTemporaryPlace(null)
+        onPlaceSelect(null)
 
-      setTemporaryPlace(null)
-      onPlaceSelect(null)
+        let place = placeList.find((p) => p.isLocal && p.comercioData?.iD_Comercio === iD_Comercio)
 
-      let place = placeList.find((p) => {
-        const isMatch = p.isLocal && p.comercioData?.iD_Comercio === iD_Comercio
-        return isMatch
-      })
+        if (!place) {
+          const response = await Apis.obtenerComercioPorId(iD_Comercio)
+          const comercio = response.data
 
-      console.log("Found place in placeList:", place ? place.name : "NOT FOUND")
+          const coordinates = await geocodeAddress(comercio.direccion)
 
-      if (!place) {
-        console.log("Fetching comercio from API...")
-        const response = await Apis.obtenerComercioPorId(iD_Comercio)
-        const comercio = response.data
-
-        console.log("Comercio fetched:", comercio.nombre)
-
-        const coordinates = await geocodeAddress(comercio.direccion)
-        console.log("Geocoded coordinates:", coordinates)
-
-        place = {
-          place_id: `local_${comercio.iD_Comercio}`,
-          name: comercio.nombre,
-          vicinity: comercio.direccion,
-          formatted_address: comercio.direccion,
-          geometry: {
-            location: {
-              lat: coordinates.lat,
-              lng: coordinates.lng,
+          place = {
+            place_id: `local_${comercio.iD_Comercio}`,
+            name: comercio.nombre,
+            vicinity: comercio.direccion,
+            formatted_address: comercio.direccion,
+            geometry: {
+              location: {
+                lat: coordinates.lat,
+                lng: coordinates.lng,
+              },
             },
-          },
-          rating: comercio.rating || 4.0,
-          types: comercio.iD_TipoComercio === 1 ? ["bar", "establishment"] : ["night_club", "establishment"],
-          opening_hours: {
-            open_now: true,
-          },
-          photos: comercio.foto
-            ? [
-                {
-                  photo_reference: comercio.foto,
-                  isBase64: true,
-                },
-              ]
-            : null,
-          source: "local",
-          isLocal: true,
-          comercioData: comercio,
-          generoMusical: comercio.generoMusical,
-          capacidad: comercio.capacidad,
-          mesas: comercio.mesas,
-          telefono: comercio.telefono,
-          correo: comercio.correo,
-          hora_ingreso: comercio.hora_ingreso,
-          hora_cierre: comercio.hora_cierre,
-        }
-
-        setTemporaryPlace(place)
-        console.log("Temporary place set for marker")
-      }
-
-      if (place && mapRef.current) {
-        console.log("Animating to place location")
-        const region = {
-          latitude: Number(place.geometry.location.lat),
-          longitude: Number(place.geometry.location.lng),
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        }
-
-        mapRef.current.animateToRegion(region, 1000)
-
-        setTimeout(() => {
-          console.log(" Opening place detail modal")
-          onPlaceSelect(place)
-        }, 1100)
-      }
-    } catch (error) {
-      console.error(" Error en handleStoryPress:", error)
-      console.error("Stack:", error.stack)
-      setTemporaryPlace(null)
-      onPlaceSelect(null)
-    }
-    }
-
-  const filterPlacesByType = (places, selectedTypes) => {
-    if (!selectedTypes || selectedTypes.length === 0) {
-      return places
-    }
-
-    const typesArray = selectedTypes.split(",").filter((t) => t.trim())
-    const selectedGenres = onSearch?.selectedGenres?.split(",").filter((g) => g.trim()) || []
-
-    return places.filter((place) => {
-      if (!place.isLocal && place.types) {
-        // Si solo se seleccionó "bar", excluir night_clubs
-        if (typesArray.includes("bar") && !typesArray.includes("night_club")) {
-          return place.types.includes("bar") && !place.types.includes("night_club")
-        }
-        
-        // Si solo se seleccionó "night_club", ser más inteligente
-        if (typesArray.includes("night_club") && !typesArray.includes("bar")) {
-          const hasBarInName = place.name?.toLowerCase().includes("bar")
-          const hasBarInTypes = place.types.includes("bar")
-          const isNightClub = place.types.includes("night_club")
-
-          if (place.isLocal && place.generoMusical) {
-            return true // Es un bar bailable local
+            rating: comercio.rating || 4.0,
+            types: comercio.iD_TipoComercio === 1 ? ["bar", "establishment"] : ["night_club", "establishment"],
+            opening_hours: {
+              open_now: true,
+            },
+            photos: comercio.foto
+              ? [
+                  {
+                    photo_reference: comercio.foto,
+                    isBase64: true,
+                  },
+                ]
+              : null,
+            source: "local",
+            isLocal: true,
+            comercioData: comercio,
+            generoMusical: comercio.generoMusical,
+            capacidad: comercio.capacidad,
+            mesas: comercio.mesas,
+            telefono: comercio.telefono,
+            correo: comercio.correo,
+            hora_ingreso: comercio.hora_ingreso,
+            hora_cierre: comercio.hora_cierre,
           }
 
-          if (selectedGenres && selectedGenres.length > 0) {
-            return true // El usuario busca por género, incluir bares bailables
-          }
-
-          // Excluir bares normales (sin música)
-          if (hasBarInName || hasBarInTypes) {
-            return false
-          }
-
-          return isNightClub
+          setTemporaryPlace(place)
         }
-        
-        // Si se seleccionaron ambos, incluir cualquiera
-        return place.types.some((type) => typesArray.includes(type))
+
+        if (place && mapRef.current) {
+          const region = {
+            latitude: Number(place.geometry.location.lat),
+            longitude: Number(place.geometry.location.lng),
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          }
+
+          mapRef.current.animateToRegion(region, 1000)
+
+          setTimeout(() => {
+            onPlaceSelect(place)
+          }, 1100)
+        }
+      } catch (error) {
+        console.error("Error en handleStoryPress:", error)
+        setTemporaryPlace(null)
+        onPlaceSelect(null)
+      }
+    },
+    [placeList, geocodeAddress, onPlaceSelect],
+  )
+
+  const filterPlacesByType = useCallback(
+    (places, selectedTypes) => {
+      if (!selectedTypes || selectedTypes.length === 0) {
+        return places
       }
 
-      // Para comercios locales, ya están filtrados correctamente
-      return true
-    })
-  }
+      const typesArray = selectedTypes.split(",").filter((t) => t.trim())
+      const selectedGenres = onSearch?.selectedGenres?.split(",").filter((g) => g.trim()) || []
+
+      return places.filter((place) => {
+        if (!place.isLocal && place.types) {
+          if (typesArray.includes("bar") && !typesArray.includes("night_club")) {
+            return place.types.includes("bar") && !place.types.includes("night_club")
+          }
+
+          if (typesArray.includes("night_club") && !typesArray.includes("bar")) {
+            const hasBarInName = place.name?.toLowerCase().includes("bar")
+            const hasBarInTypes = place.types.includes("bar")
+            const isNightClub = place.types.includes("night_club")
+
+            if (place.isLocal && place.generoMusical) {
+              return true
+            }
+
+            if (selectedGenres && selectedGenres.length > 0) {
+              return true
+            }
+
+            if (hasBarInName || hasBarInTypes) {
+              return false
+            }
+
+            return isNightClub
+          }
+
+          return place.types.some((type) => typesArray.includes(type))
+        }
+
+        return true
+      })
+    },
+    [onSearch?.selectedGenres],
+  )
 
   const markers = useMemo(() => {
-   const selectedTypes = onSearch?.selectedTypes || ""
+    const selectedTypes = onSearch?.selectedTypes || ""
     const filteredPlaces = filterPlacesByType(placeList, selectedTypes)
 
-    return filteredPlaces.map((item, index) => {
-      if (!item.geometry || !item.geometry.location || !item.geometry.location.lat || !item.geometry.location.lng) {
-        console.warn("⚠️ Lugar sin coordenadas válidas:", item.name)
-        return null
-      }
-
-      const lat = Number(item.geometry.location.lat)
-      const lng = Number(item.geometry.location.lng)
-
-      if (isNaN(lat) || isNaN(lng)) {
-        console.warn(" Coordenadas no numéricas:", item.name, { lat, lng })
-        return null
-      }
-
-      return (
+    return filteredPlaces
+      .filter(
+        (item) =>
+          item.geometry?.location?.lat &&
+          item.geometry?.location?.lng &&
+          !isNaN(Number(item.geometry.location.lat)) &&
+          !isNaN(Number(item.geometry.location.lng)),
+      )
+      .map((item, index) => (
         <PlaceMarker
           key={item.place_id || `place_${index}`}
           item={item}
           onPress={() => onMarkerPress(item)}
           isSelected={selectedPlace && selectedPlace.place_id === item.place_id}
-          
         />
-      )
-    })
-   }, [placeList, selectedPlace, onSearch])
+      ))
+  }, [placeList, selectedPlace, onSearch?.selectedTypes, filterPlacesByType, onMarkerPress])
 
   const handleNavigateToLogin = useCallback(() => {
-    console.log("🚪 Usuario navegando al login - limpiando estados")
     setTemporaryPlace(null)
     onPlaceSelect(null)
   }, [onPlaceSelect])
@@ -315,9 +264,12 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
             initialRegion={mapRegion}
             customMapStyle={mapStyle}
             onMapReady={() => {
-              console.log(" Mapa completamente cargado")
               setMapReady(true)
             }}
+            moveOnMarkerPress={false}
+            loadingEnabled={true}
+            loadingIndicatorColor="#5c288c"
+            loadingBackgroundColor="#1a1a2e"
           >
             <Marker
               coordinate={{
@@ -325,7 +277,7 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
                 longitude: mapRegion.longitude,
               }}
               title={"Estás aquí"}
-               zIndex={0}
+              zIndex={0}
               tracksViewChanges={false}
             />
 
@@ -363,7 +315,7 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
         onNavigateToLogin={handleNavigateToLogin}
       />
 
-      {showStories && mapReady && (
+      {mapReady && (
         <View style={styles.storiesContainer}>
           <BarStories onStoryPress={handleStoryPress} />
         </View>
