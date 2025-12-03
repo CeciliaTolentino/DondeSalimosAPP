@@ -373,8 +373,9 @@ export default function Profile() {
         try {
           const reseniasResponse = await Apis.obtenerReseniasPorComercio(comercio.nombre)
           const comercioReviews = reseniasResponse.data || []
+          const reseniasAprobadas = comercioReviews.filter((r) => r.estado === true && !r.motivoRechazo)
 
-          const formattedReseñas = comercioReviews.map((r) => ({
+          const formattedReseñas = reseniasAprobadas.map((r) => ({
             id: r.iD_Resenia,
             usuario: r.usuario?.nombreUsuario || "Usuario anónimo",
             comercio: comercio.nombre,

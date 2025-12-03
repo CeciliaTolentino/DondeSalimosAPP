@@ -101,9 +101,9 @@ export default function GoogleMapViewFull({ placeList, onSearch, selectedPlace, 
 
   const geocodeAddress = async (address) => {
     try {
-      const key = process.env.EXPO_PUBLIC_API_KEY
+      const baseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_URL
       const encodedAddress = encodeURIComponent(address)
-      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodedAddress}&key=${key}`
+        const url = `${baseUrl}/api/GooglePlaces/geocode?address=${encodedAddress}`
 
       console.log(" Geocoding address:", address)
       const response = await fetch(url)

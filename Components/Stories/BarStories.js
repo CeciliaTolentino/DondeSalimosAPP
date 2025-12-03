@@ -66,8 +66,8 @@ export default function BarStories({ onStoryPress }) {
       if (response.status === 200) {
         const activas = response.data.filter((pub) => {
           try {
-            if (pub.estado !== true) return false
-
+            if (!pub.estado || !pub.pago) return false
+           
             const imagenBase64 = pub.imagen || pub.Imagen || pub.foto || pub.Foto
             if (!imagenBase64 || imagenBase64.length === 0) return false
 
@@ -76,7 +76,8 @@ export default function BarStories({ onStoryPress }) {
             const fechaExpiracion = new Date(fechaCreacion.getTime() + dias * 24 * 60 * 60 * 1000)
             const hoy = new Date()
 
-            return fechaExpiracion > hoy
+           return fechaExpiracion > hoy
+          
           } catch (error) {
             console.error("Error al procesar publicidad:", pub.iD_Publicidad, error)
             return false
