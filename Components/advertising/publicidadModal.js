@@ -29,22 +29,21 @@ export default function PublicidadModal({
   const [imageBase64, setImageBase64] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [descripcion, setDescripcion] = useState("")
-  //const isRejectedUnpaid = publicidadToEdit?.isRejectedUnpaid || false
+
+  // PRECIOS UNIFICADOS PARA PRUEBAS (valores bajos)
   const durations = [
-    { id: "1semana", label: "1 Semana", price: 45000, days: 7, timeSpan: "7:00:00.000" },
-    { id: "15dias", label: "15 Días", price: 75000, days: 15, timeSpan: "15:00:00.000" },
-    { id: "1mes", label: "1 Mes", price: 140000, days: 30, timeSpan: "23:00:00.000" },
+    { id: "1semana", label: "1 Semana", price: 100, days: 7, timeSpan: "7:00:00.000" },
+    { id: "15dias", label: "15 Días", price: 150, days: 15, timeSpan: "15:00:00.000" },
+    { id: "1mes", label: "1 Mes", price: 200, days: 30, timeSpan: "23:00:00.000" },
   ]
- 
+
   useEffect(() => {
-   
     if (publicidadToEdit) {
       setDescripcion(publicidadToEdit.descripcion || "")
-      
+
       const imageData = publicidadToEdit.imagen || publicidadToEdit.foto
       if (imageData) {
         setImageBase64(imageData)
-        // Check if it already has the data URI prefix
         if (imageData.startsWith("data:image")) {
           setSelectedImage(imageData)
         } else {
@@ -52,20 +51,20 @@ export default function PublicidadModal({
         }
       }
 
-      // Determine duration from tiempo field
+      // Determinar duración desde el campo tiempo
       const tiempo = publicidadToEdit.tiempo
-      if (tiempo === "1 semana") setSelectedDuration(durations[0])
-      else if (tiempo === "15 dias") setSelectedDuration(durations[1])
-      else if (tiempo === "1 mes") setSelectedDuration(durations[2])
+      if (tiempo === "1 semana" || tiempo?.includes("7:00:00")) setSelectedDuration(durations[0])
+      else if (tiempo === "15 dias" || tiempo?.includes("15:00:00")) setSelectedDuration(durations[1])
+      else if (tiempo === "1 mes" || tiempo?.includes("23:00:00")) setSelectedDuration(durations[2])
 
-    if ((isEditingRejectedPaid || isRejectedUnpaid) && selectedDuration === null) {
+      if ((isEditingRejectedPaid || isRejectedUnpaid) && selectedDuration === null) {
         const matchedDuration = durations.find(
-          (d) => publicidadToEdit.tiempo?.includes(d.timeSpan) || publicidadToEdit.tiempo === d.label,
+          (d) => publicidadToEdit.tiempo?.includes(d.timeSpan) || publicidadToEdit.tiempo === d.label
         )
         if (matchedDuration) setSelectedDuration(matchedDuration)
       }
     } else {
-      // Reset for new publicidad
+      // Reset para nueva publicidad
       setSelectedDuration(null)
       setSelectedImage(null)
       setImageBase64(null)
@@ -89,9 +88,8 @@ export default function PublicidadModal({
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-         allowsEditing: false,
+        allowsEditing: false,
         quality: 0.8,
-       
       })
 
       if (!result.cancelled && result.assets && result.assets[0]) {
@@ -111,10 +109,41 @@ export default function PublicidadModal({
     }
   }
 
-  const handleConfirm = async () => {
-   // if (!isEditingRejectedPaid && !selectedDuration) {
-   
+  const openMercadoPagoCheckout = async (checkoutUrl, publicidadId) => {
+    console.log("[PublicidadModal] Abriendo checkout de MercadoPago:", checkoutUrl)
 
+    try {
+      const supported = await Linking.canOpenURL(checkoutUrl)
+
+      if (supported) {
+        // Abrir MercadoPago
+        await Linking.openURL(checkoutUrl)
+
+        // Mostrar instrucciones al usuario
+        Alert.alert(
+          "Redirigido a Mercado Pago",
+          "Completa el pago en Mercado Pago. Una vez finalizado, regresa a la app y tu publicidad será activada automáticamente.\n\n" +
+            "Si ya completaste el pago, presiona 'Verificar Pago' o espera unos segundos.",
+          [
+            {
+              text: "Entendido",
+              onPress: () => {
+                console.log("[PublicidadModal] Usuario cerró el alert")
+                onClose()
+              },
+            },
+          ]
+        )
+      } else {
+        Alert.alert("Error", "No se pudo abrir el link de pago de Mercado Pago.")
+      }
+    } catch (error) {
+      console.error("[PublicidadModal] Error abriendo checkout:", error)
+      Alert.alert("Error", "No se pudo abrir Mercado Pago. Intenta nuevamente.")
+    }
+  }
+
+  const handleConfirm = async () => {
     if (!isEditingRejectedPaid && !isRejectedUnpaid && !selectedDuration) {
       Alert.alert("Error", "Por favor selecciona una duración para la publicidad.")
       return
@@ -126,7 +155,7 @@ export default function PublicidadModal({
     }
 
     if (!comercio) {
-       console.log("ERROR: comercio is null or undefined:", comercio)
+      console.log("ERROR: comercio is null or undefined:", comercio)
       Alert.alert("Error", "No se pudo identificar el comercio.")
       return
     }
@@ -134,89 +163,60 @@ export default function PublicidadModal({
     setIsLoading(true)
 
     try {
+      // CASO 1: Publicidad rechazada NO pagada - actualizar y pagar
       if (isRejectedUnpaid && publicidadToEdit) {
-       console.log("Actualizando publicidad rechazada no pagada...")
-        console.log("Publicidad data:", {
-          id: publicidadToEdit.iD_Publicidad,
-          comercioId: publicidadToEdit.iD_Comercio,
-          duracion: selectedDuration?.timeSpan,
-        })
+        console.log("[PublicidadModal] Actualizando publicidad rechazada no pagada...")
 
         const updateResponse = await Apis.actualizarPublicidad(publicidadToEdit.iD_Publicidad, {
           descripcion: descripcion || publicidadToEdit.descripcion,
           visualizaciones: publicidadToEdit.visualizaciones || 0,
           tiempo: selectedDuration.timeSpan,
-          estado: false, 
+          estado: false,
           fechaCreacion: publicidadToEdit.fechaCreacion,
           iD_Comercio: publicidadToEdit.iD_Comercio,
           iD_TipoComercio: publicidadToEdit.iD_TipoComercio,
           foto: imageBase64,
-          pago: false, 
-          motivoRechazo: null, 
+          pago: false,
+          motivoRechazo: null,
         })
-console.log("Update response:", updateResponse.status)
-        if (updateResponse.status === 200 || updateResponse.status === 204) {
-          Alert.alert(
-            "Publicidad Actualizada",
-            "Tu publicidad ha sido actualizada. Ahora debes completar el pago para enviarla a revisión.",
-            [
-              {
-                text: "Ir a pagar",
-                onPress: async () => {
-                  try {
-                     console.log("Generando link de pago...")
-                    const preferenciaResponse = await Apis.crearPreferenciaPago({
-                      titulo: `Publicidad ${selectedDuration.label} - ${comercio.nombre}`,
-                      precio: selectedDuration.price,
-                      publicidadId: publicidadToEdit.iD_Publicidad,
-                    })
-console.log("Preferencia creada:", preferenciaResponse.data?.init_point)
-                    if (preferenciaResponse.data && preferenciaResponse.data.init_point) {
-                      const checkoutUrl = preferenciaResponse.data.init_point
-                      const supported = await Linking.canOpenURL(checkoutUrl)
 
-                      if (supported) {
-                        await Linking.openURL(checkoutUrl)
-                        Alert.alert("Redirigido a Mercado Pago", "Completa el pago para activar tu publicidad.", [
-                          { text: "Entendido", onPress: () => onClose() },
-                        ])
-                      } else {
-                        Alert.alert("Error", "No se pudo abrir el link de pago.")
-                      }
-                    }
-                  } catch (error) {
-                    console.error("Error al generar link de pago:", error)
-                    Alert.alert("Error", "No se pudo generar el link de pago.")
-                  }
-                },
-              },
-              {
-                text: "Más tarde",
-                style: "cancel",
-                onPress: () => onClose(),
-              },
-            ],
-          )
+        if (updateResponse.status === 200 || updateResponse.status === 204) {
+          // Generar link de pago
+          const preferenciaResponse = await Apis.crearPreferenciaPago({
+            titulo: `Publicidad ${selectedDuration.label} - ${comercio.nombre}`,
+            precio: selectedDuration.price,
+            publicidadId: publicidadToEdit.iD_Publicidad,
+          })
+
+          if (preferenciaResponse.data?.init_point) {
+            setIsLoading(false)
+            await openMercadoPagoCheckout(
+              preferenciaResponse.data.init_point,
+              publicidadToEdit.iD_Publicidad
+            )
+          } else {
+            throw new Error("No se pudo generar el link de pago")
+          }
         } else {
           throw new Error("No se pudo actualizar la publicidad")
         }
-
-        setIsLoading(false)
         return
       }
+
+      // CASO 2: Publicidad rechazada YA pagada - solo actualizar imagen
       if (isEditingRejectedPaid && publicidadToEdit) {
-        console.log("Actualizando publicidad rechazada pagada...")
+        console.log("[PublicidadModal] Actualizando publicidad rechazada pagada...")
 
         const updateResponse = await Apis.actualizarPublicidadRechazadaPagada(
           publicidadToEdit.iD_Publicidad,
-          imageBase64,
+          imageBase64
         )
 
         if (updateResponse.status === 200 || updateResponse.status === 204) {
           Alert.alert(
             "Publicidad Actualizada",
             "Tu publicidad ha sido enviada nuevamente para revisión del administrador.",
-            [{ text: "Entendido", onPress: () => onClose() }],
+            [{ text: "Entendido", onPress: () => onClose() }]
           )
         } else {
           throw new Error("No se pudo actualizar la publicidad")
@@ -225,6 +225,31 @@ console.log("Preferencia creada:", preferenciaResponse.data?.init_point)
         setIsLoading(false)
         return
       }
+
+      // CASO 3: Renovar publicidad existente
+      if (publicidadToEdit && !isRejectedUnpaid && !isEditingRejectedPaid) {
+        console.log("[PublicidadModal] Renovando publicidad existente...")
+
+        const preferenciaResponse = await Apis.crearPreferenciaPago({
+          titulo: `Publicidad ${selectedDuration.label} - ${comercio.nombre}`,
+          precio: selectedDuration.price,
+          publicidadId: publicidadToEdit.iD_Publicidad,
+        })
+
+        if (preferenciaResponse.data?.init_point) {
+          setIsLoading(false)
+          await openMercadoPagoCheckout(
+            preferenciaResponse.data.init_point,
+            publicidadToEdit.iD_Publicidad
+          )
+        } else {
+          throw new Error("No se pudo crear la preferencia de pago")
+        }
+        return
+      }
+
+      // CASO 4: Nueva publicidad
+      console.log("[PublicidadModal] Creando nueva publicidad...")
 
       const fechaCreacion = new Date()
       const fechaExpiracion = new Date(fechaCreacion)
@@ -233,9 +258,9 @@ console.log("Preferencia creada:", preferenciaResponse.data?.init_point)
       const publicidadData = {
         descripcion: descripcion || "Publicidad de " + comercio.nombre,
         foto: imageBase64,
-        visualizaciones: publicidadToEdit ? publicidadToEdit.visualizaciones : 0,
+        visualizaciones: 0,
         tiempo: selectedDuration.timeSpan,
-        estado: false, 
+        estado: false,
         fechaCreacion: fechaCreacion.toISOString(),
         fechaExpiracion: fechaExpiracion.toISOString(),
         iD_Comercio: comercio.iD_Comercio,
@@ -243,94 +268,31 @@ console.log("Preferencia creada:", preferenciaResponse.data?.init_point)
         precio: selectedDuration.price,
       }
 
-      if (publicidadToEdit) {
-        // Renovando existing publicidad - generate new payment link
-        console.log("Renovando publicidad existente...")
+      const createResponse = await Apis.crearPublicidad(publicidadData)
 
-        console.log("Creando preferencia de pago en Mercado Pago...")
+      if (createResponse.status === 200 || createResponse.status === 201) {
+        const publicidadId = createResponse.data.id || createResponse.data.iD_Publicidad
+        console.log("[PublicidadModal] Publicidad creada con ID:", publicidadId)
+
+        // Crear preferencia de pago
         const preferenciaResponse = await Apis.crearPreferenciaPago({
           titulo: `Publicidad ${selectedDuration.label} - ${comercio.nombre}`,
           precio: selectedDuration.price,
-          publicidadId: publicidadToEdit.iD_Publicidad, // Use existing publicidad ID
+          publicidadId: publicidadId,
         })
-console.log("Redirigiendo a Mercado Pago:", preferenciaResponse.data?.init_point)
-        if (preferenciaResponse.data && preferenciaResponse.data.init_point) {
-          const checkoutUrl = preferenciaResponse.data.init_point
 
-          console.log("Redirigiendo a Mercado Pago:", checkoutUrl)
-
-          const supported = await Linking.canOpenURL(checkoutUrl)
-
-          if (supported) {
-            await Linking.openURL(checkoutUrl)
-
-            Alert.alert(
-              "Redirigido a Mercado Pago",
-              "Completa el pago en la ventana que se abrió. Una vez completado, tu publicidad será activada automáticamente.",
-              [
-                {
-                  text: "Entendido",
-                  onPress: () => onClose(),
-                },
-              ],
-            )
-          } else {
-            Alert.alert("Error", "No se pudo abrir el link de pago de Mercado Pago.")
-          }
-         } else {
-          Alert.alert("Error", "No se pudo crear la preferencia de pago. Intenta nuevamente.")
-
-        }
-        
-      } else {
-        console.log("Creando nueva publicidad pendiente de pago...")
-        const createResponse = await Apis.crearPublicidad(publicidadData)
-
-        if (createResponse.status === 200 || createResponse.status === 201) {
-           const publicidadId = createResponse.data.id || createResponse.data.iD_Publicidad
-
-          console.log("Publicidad creada con ID:", publicidadId)
-          console.log("Response completo:", JSON.stringify(createResponse.data, null, 2))
-          console.log("Creando preferencia de pago en Mercado Pago...")
-          const preferenciaResponse = await Apis.crearPreferenciaPago({
-            titulo: `Publicidad ${selectedDuration.label} - ${comercio.nombre}`,
-            precio: selectedDuration.price,
-            publicidadId: publicidadId, // Send publicidad ID to be activated after payment
-          })
-console.log("Redirigiendo a Mercado Pago:", preferenciaResponse.data?.init_point)
-          if (preferenciaResponse.data && preferenciaResponse.data.init_point) {
-            const checkoutUrl = preferenciaResponse.data.init_point
-
-            console.log("Redirigiendo a Mercado Pago:", checkoutUrl)
-
-            const supported = await Linking.canOpenURL(checkoutUrl)
-
-            if (supported) {
-              await Linking.openURL(checkoutUrl)
-
-              Alert.alert(
-                "Redirigido a Mercado Pago",
-                "Completa el pago en la ventana que se abrió. Una vez completado, tu publicidad será activada automáticamente.",
-                [
-                  {
-                    text: "Entendido",
-                    onPress: () => onClose(),
-                  },
-                ],
-              )
-            } else {
-              Alert.alert("Error", "No se pudo abrir el link de pago de Mercado Pago.")
-            }
-          } else {
-            Alert.alert("Error", "No se pudo crear la preferencia de pago. Intenta nuevamente.")
-          }
+        if (preferenciaResponse.data?.init_point) {
+          setIsLoading(false)
+          await openMercadoPagoCheckout(preferenciaResponse.data.init_point, publicidadId)
+        } else {
+          throw new Error("No se pudo crear la preferencia de pago")
         }
       }
     } catch (error) {
-      console.error("Error al procesar publicidad:", error)
+      console.error("[PublicidadModal] Error al procesar publicidad:", error)
       Alert.alert(
         "Error",
-        error.response?.data?.message || "No se pudo procesar la publicidad. Por favor intenta nuevamente.",
+        error.response?.data?.message || "No se pudo procesar la publicidad. Por favor intenta nuevamente."
       )
     } finally {
       setIsLoading(false)
@@ -350,58 +312,67 @@ console.log("Redirigiendo a Mercado Pago:", preferenciaResponse.data?.init_point
               {isEditingRejectedPaid
                 ? "Actualizar Publicidad Rechazada"
                 : isRejectedUnpaid
-                  ? "Editar y Pagar Publicidad"
+                ? "Editar y Pagar Publicidad"
                 : publicidadToEdit
-                  ? "Editar Publicidad"
-                  : "Publicidad del Comercio"}
+                ? "Renovar Publicidad"
+                : "Nueva Publicidad"}
             </Text>
             <Text style={styles.subtitle}>{comercio?.nombre}</Text>
 
+            {/* Selector de duración - no mostrar si es edición de rechazada pagada */}
             {!isEditingRejectedPaid && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Selecciona la duración:</Text>
-              {durations.map((duration) => (
-                <TouchableOpacity
-                  key={duration.id}
-                  style={[styles.durationCard, selectedDuration?.id === duration.id && styles.durationCardSelected]}
-                  onPress={() => setSelectedDuration(duration)}
-                >
-                  <View style={styles.durationInfo}>
-                    <Text style={styles.durationLabel}>{duration.label}</Text>
-                    <Text style={styles.durationPrice}>${duration.price}</Text>
-                  </View>
-                  {selectedDuration?.id === duration.id && (
-                    <MaterialCommunityIcons name="check-circle" size={24} color="#28a745" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-   )}
-   {isEditingRejectedPaid && (
-              <View style={styles.rejectedInfoBox}>
-                <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
-                <View style={styles.rejectedInfoText}>
-                  <Text style={styles.rejectedInfoTitle}>Publicidad Rechazada</Text>
-                  <Text style={styles.rejectedInfoDescription}>
-                    Tu publicidad fue rechazada. Actualiza la imagen y será enviada nuevamente para revisión. No
-                    necesitas pagar de nuevo.
-                  </Text>
-                </View>
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Selecciona la duración:</Text>
+                {durations.map((duration) => (
+                  <TouchableOpacity
+                    key={duration.id}
+                    style={[
+                      styles.durationCard,
+                      selectedDuration?.id === duration.id && styles.durationCardSelected,
+                    ]}
+                    onPress={() => setSelectedDuration(duration)}
+                  >
+                    <View style={styles.durationInfo}>
+                      <Text style={styles.durationLabel}>{duration.label}</Text>
+                      <Text style={styles.durationPrice}>${duration.price}</Text>
+                    </View>
+                    {selectedDuration?.id === duration.id && (
+                      <MaterialCommunityIcons name="check-circle" size={24} color="#28a745" />
+                    )}
+                  </TouchableOpacity>
+                ))}
               </View>
             )}
- {isRejectedUnpaid && (
+
+            {/* Info de rechazada pagada */}
+            {isEditingRejectedPaid && (
               <View style={styles.rejectedInfoBox}>
                 <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
                 <View style={styles.rejectedInfoText}>
                   <Text style={styles.rejectedInfoTitle}>Publicidad Rechazada</Text>
                   <Text style={styles.rejectedInfoDescription}>
-                    Tu publicidad fue rechazada. Edita la imagen y duración, luego completa el pago para enviarla
-                    nuevamente a revisión.
+                    Tu publicidad fue rechazada. Actualiza la imagen y será enviada nuevamente para
+                    revisión. No necesitas pagar de nuevo.
                   </Text>
                 </View>
               </View>
             )}
 
+            {/* Info de rechazada no pagada */}
+            {isRejectedUnpaid && (
+              <View style={styles.rejectedInfoBox}>
+                <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
+                <View style={styles.rejectedInfoText}>
+                  <Text style={styles.rejectedInfoTitle}>Publicidad Rechazada</Text>
+                  <Text style={styles.rejectedInfoDescription}>
+                    Tu publicidad fue rechazada. Edita la imagen y duración, luego completa el pago
+                    para enviarla nuevamente a revisión.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Selector de imagen */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Imagen de la publicidad:</Text>
               <TouchableOpacity style={styles.imageButton} onPress={handleImagePicker}>
@@ -411,8 +382,12 @@ console.log("Redirigiendo a Mercado Pago:", preferenciaResponse.data?.init_point
               {selectedImage && <Image source={{ uri: selectedImage }} style={styles.previewImage} />}
             </View>
 
+            {/* Botón de confirmación */}
             <TouchableOpacity
-              style={[styles.confirmButton, ((!isEditingRejectedPaid && !selectedDuration) || !imageBase64 || isLoading) && styles.disabledButton,
+              style={[
+                styles.confirmButton,
+                ((!isEditingRejectedPaid && !selectedDuration) || !imageBase64 || isLoading) &&
+                  styles.disabledButton,
               ]}
               onPress={handleConfirm}
               disabled={(!isEditingRejectedPaid && !selectedDuration) || !imageBase64 || isLoading}
@@ -426,25 +401,29 @@ console.log("Redirigiendo a Mercado Pago:", preferenciaResponse.data?.init_point
                     {isEditingRejectedPaid
                       ? "Enviar para Revisión"
                       : isRejectedUnpaid
-                        ? "Actualizar y Pagar"
+                      ? "Actualizar y Pagar"
                       : publicidadToEdit
-                        ? "Actualizar Publicidad"
-                        : "Confirmar y Pagar"}
+                      ? "Renovar y Pagar"
+                      : "Confirmar y Pagar"}
                   </Text>
                 </>
               )}
             </TouchableOpacity>
 
-           {!publicidadToEdit && !isEditingRejectedPaid && !isRejectedUnpaid && (
+            {/* Info de pago */}
+            {!publicidadToEdit && !isEditingRejectedPaid && !isRejectedUnpaid && (
               <View style={styles.paymentInfoBox}>
                 <MaterialCommunityIcons name="information" size={24} color="#0066cc" />
                 <View style={styles.paymentInfoText}>
                   <Text style={styles.paymentInfoTitle}>Pago seguro con Mercado Pago</Text>
                   <Text style={styles.paymentInfoDescription}>
-                    Serás redirigido a Mercado Pago para completar el pago de forma segura. Podrás pagar con tarjeta de
-                    crédito, débito o efectivo.
+                    Serás redirigido a Mercado Pago para completar el pago de forma segura. Podrás
+                    pagar con tarjeta de crédito, débito o efectivo.
                   </Text>
-                 
+                  <Text style={styles.paymentInfoNote}>
+                    💡 Una vez completado el pago, regresa a la app y tu publicidad se activará
+                    automáticamente.
+                  </Text>
                 </View>
               </View>
             )}

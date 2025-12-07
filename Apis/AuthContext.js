@@ -1,9 +1,9 @@
-
-import { createContext, useState, useCallback, useEffect } from "react"
+import { createContext, useState, useCallback, useEffect, useRef } from "react"
 import { GoogleSignin } from "./../firebase"
-import { Alert } from "react-native"
+import { Alert, Linking } from "react-native"
 import { getRoleIdByDescription, getRoleDescriptionById, ROLE_DESCRIPTIONS } from "../utils/roleHelper"
 import { clearJwtToken, storeJwtToken, getJwtToken } from "../Apis/Apis"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL
 export const AuthContext = createContext()
@@ -19,34 +19,191 @@ export const AuthProvider = ({ children }) => {
     isRegistered: false,
     googleIdToken: null,
     googleUserData: null,
+    // Nuevo: para manejar navegación después de pago
+    pendingPaymentNavigation: null,
   })
-useEffect(() => {
+
+  const isRestoringSession = useRef(false)
+
+  // Guardar datos del usuario en AsyncStorage para restaurar sesión
+  const persistUserData = async (userData) => {
+    try {
+      if (userData) {
+        await AsyncStorage.setItem("userData", JSON.stringify(userData))
+        console.log("[AuthContext] Datos de usuario persistidos")
+      }
+    } catch (error) {
+      console.error("[AuthContext] Error persistiendo datos de usuario:", error)
+    }
+  }
+
+  // Restaurar datos del usuario desde AsyncStorage
+  const restoreUserData = async () => {
+    try {
+      const userDataString = await AsyncStorage.getItem("userData")
+      if (userDataString) {
+        const userData = JSON.parse(userDataString)
+        console.log("[AuthContext] Datos de usuario restaurados:", userData?.correo)
+        return userData
+      }
+      return null
+    } catch (error) {
+      console.error("[AuthContext] Error restaurando datos de usuario:", error)
+      return null
+    }
+  }
+
+  // Limpiar datos persistidos
+  const clearPersistedData = async () => {
+    try {
+      await AsyncStorage.multiRemove(["userData", "jwtToken"])
+      console.log("[AuthContext] Datos persistidos limpiados")
+    } catch (error) {
+      console.error("[AuthContext] Error limpiando datos persistidos:", error)
+    }
+  }
+
+  useEffect(() => {
     const checkInitialAuth = async () => {
       try {
-        console.log("Verificando autenticación inicial...")
+        console.log("[AuthContext] Verificando autenticación inicial...")
+        isRestoringSession.current = true
+
         const token = await getJwtToken()
-console.log("Token", token)
-        if (token) {
-          console.log("Token encontrado en AsyncStorage al iniciar")
-          // Aquí podrías validar el token con el backend si quieres
-          // Por ahora, simplemente lo limpiamos si no hay usuario en el estado
-          console.log("Limpiando token antiguo...")
-          await clearJwtToken()
-          console.log("Token limpiado exitosamente")
+        const userData = await restoreUserData()
+
+        if (token && userData) {
+          console.log("[AuthContext] Sesión encontrada, restaurando...")
+          
+          // Restaurar el estado de autenticación
+          let isAdmin = false
+          let isBarOwner = false
+
+          if (userData?.iD_RolUsuario) {
+            try {
+              const roleDescription = await getRoleDescriptionById(userData.iD_RolUsuario)
+              isAdmin = roleDescription === ROLE_DESCRIPTIONS.ADMINISTRADOR
+              isBarOwner = roleDescription === ROLE_DESCRIPTIONS.USUARIO_COMERCIO
+            } catch (error) {
+              console.error("[AuthContext] Error determinando rol:", error)
+            }
+          }
+
+          setAuthState((prev) => ({
+            ...prev,
+            user: userData,
+            isAdmin,
+            isBarOwner,
+            isApproved: userData?.estado,
+            isLoading: false,
+            isAuthenticated: true,
+            isRegistered: true,
+          }))
+
+          console.log("[AuthContext] Sesión restaurada exitosamente")
         } else {
-          console.log("No hay token guardado al iniciar")
+          console.log("[AuthContext] No hay sesión guardada")
+          setAuthState((prev) => ({ ...prev, isLoading: false }))
         }
       } catch (error) {
-        console.error("Error verificando autenticación inicial:", error)
-      } finally {
+        console.error("[AuthContext] Error verificando autenticación inicial:", error)
         setAuthState((prev) => ({ ...prev, isLoading: false }))
+      } finally {
+        isRestoringSession.current = false
       }
     }
 
     checkInitialAuth()
   }, [])
+
+  // Manejar deep links de pago a nivel global
+  useEffect(() => {
+    const handlePaymentDeepLink = async (url) => {
+      if (!url) return
+
+      console.log("[AuthContext] Deep link recibido:", url)
+
+      // Verificar si es un deep link de pago
+      if (url.includes("dondesalimos://payment/") || url.includes("payment_id")) {
+        console.log("[AuthContext] Es un deep link de pago")
+
+        // Extraer información del pago
+        let status = "unknown"
+        let paymentId = null
+        let preferenceId = null
+        let publicidadId = null
+
+        // Parsear según el formato de la URL
+        if (url.includes("payment/success")) {
+          status = "success"
+        } else if (url.includes("payment/failure")) {
+          status = "failure"
+        } else if (url.includes("payment/pending")) {
+          status = "pending"
+        }
+
+        // Extraer parámetros
+        const paymentIdMatch = url.match(/payment_id=([^&]+)/)
+        const preferenceIdMatch = url.match(/preference_id=([^&]+)/)
+        const publicidadIdMatch = url.match(/publicidad_id=([^&]+)/)
+        const externalRefMatch = url.match(/external_reference=([^&]+)/)
+
+        paymentId = paymentIdMatch?.[1]
+        preferenceId = preferenceIdMatch?.[1]
+        publicidadId = publicidadIdMatch?.[1] || externalRefMatch?.[1]
+
+        console.log("[AuthContext] Datos del pago:", { status, paymentId, preferenceId, publicidadId })
+
+        // Guardar la navegación pendiente para que BarManagement la maneje
+        setAuthState((prev) => ({
+          ...prev,
+          pendingPaymentNavigation: {
+            status,
+            paymentId,
+            preferenceId,
+            publicidadId,
+            timestamp: Date.now(),
+          },
+        }))
+      }
+    }
+
+    // Verificar si la app se abrió con un deep link
+    const checkInitialURL = async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL()
+        if (initialUrl) {
+          console.log("[AuthContext] URL inicial:", initialUrl)
+          // Pequeño delay para asegurar que la sesión se restaure primero
+          setTimeout(() => handlePaymentDeepLink(initialUrl), 1000)
+        }
+      } catch (error) {
+        console.error("[AuthContext] Error obteniendo URL inicial:", error)
+      }
+    }
+
+    checkInitialURL()
+
+    // Escuchar deep links mientras la app está abierta
+    const subscription = Linking.addEventListener("url", (event) => {
+      handlePaymentDeepLink(event.url)
+    })
+
+    return () => {
+      subscription?.remove()
+    }
+  }, [])
+
+  // Función para limpiar la navegación pendiente de pago
+  const clearPendingPaymentNavigation = useCallback(() => {
+    setAuthState((prev) => ({
+      ...prev,
+      pendingPaymentNavigation: null,
+    }))
+  }, [])
+
   const updateAuth = useCallback(async (userData, isRegistered = false) => {
-    console.log("Actualizando estado de autenticación:", { userData, isRegistered })
+    console.log("[AuthContext] Actualizando estado de autenticación:", { userData, isRegistered })
 
     let isAdmin = false
     let isBarOwner = false
@@ -56,11 +213,14 @@ console.log("Token", token)
         const roleDescription = await getRoleDescriptionById(userData.iD_RolUsuario)
         isAdmin = roleDescription === ROLE_DESCRIPTIONS.ADMINISTRADOR
         isBarOwner = roleDescription === ROLE_DESCRIPTIONS.USUARIO_COMERCIO
-        console.log(`Rol del usuario: ${roleDescription} (ID: ${userData.iD_RolUsuario})`)
+        console.log(`[AuthContext] Rol del usuario: ${roleDescription} (ID: ${userData.iD_RolUsuario})`)
       } catch (error) {
-        console.error("Error al determinar rol del usuario:", error)
+        console.error("[AuthContext] Error al determinar rol del usuario:", error)
       }
     }
+
+    // Persistir datos del usuario
+    await persistUserData(userData)
 
     setAuthState((prevState) => ({
       ...prevState,
@@ -74,8 +234,9 @@ console.log("Token", token)
     }))
   }, [])
 
-  const clearAuth = useCallback(() => {
-    console.log("Limpiando estado de autenticación")
+  const clearAuth = useCallback(async () => {
+    console.log("[AuthContext] Limpiando estado de autenticación")
+    await clearPersistedData()
     setAuthState({
       user: null,
       isAdmin: false,
@@ -86,19 +247,19 @@ console.log("Token", token)
       isRegistered: false,
       googleIdToken: null,
       googleUserData: null,
+      pendingPaymentNavigation: null,
     })
   }, [])
 
   const formatISODate = (date) => {
     if (!date) return new Date().toISOString()
-
     const dateObj = new Date(date)
     return dateObj.toISOString()
   }
 
   const iniciarSesionConGoogle = useCallback(async (idToken) => {
     try {
-      console.log("Validando usuario con Google usando el nuevo endpoint")
+      console.log("[AuthContext] Validando usuario con Google...")
       const response = await fetch(`${API_BASE_URL}/api/usuarios/iniciarSesionConGoogle`, {
         method: "POST",
         headers: {
@@ -110,17 +271,17 @@ console.log("Token", token)
       })
 
       const result = await response.json()
-      console.log("Respuesta del endpoint iniciarSesionConGoogle:", result)
+      console.log("[AuthContext] Respuesta del endpoint iniciarSesionConGoogle")
 
       if (response.ok) {
         if (result.jwtToken) {
           await storeJwtToken(result.jwtToken)
           setAuthState((prev) => ({ ...prev, jwtToken: result.jwtToken }))
-          console.log("JWT token obtenido del login y guardado")
+          console.log("[AuthContext] JWT token guardado")
         }
         return result.usuario
       } else if (response.status === 400 && result.existeUsuario === false) {
-        console.log("Usuario no registrado:", result.mensaje)
+        console.log("[AuthContext] Usuario no registrado:", result.mensaje)
 
         Alert.alert("Registro requerido", result.mensaje, [
           {
@@ -136,18 +297,19 @@ console.log("Token", token)
       }
     } catch (error) {
       if (error.message && !error.message.includes("Usuario no existe")) {
-        console.error("Error al validar usuario con Google:", error)
+        console.error("[AuthContext] Error al validar usuario con Google:", error)
       }
       throw error
     }
   }, [])
-const refreshGoogleToken = useCallback(async () => {
+
+  const refreshGoogleToken = useCallback(async () => {
     try {
-      console.log("Refrescando token de Google...")
+      console.log("[AuthContext] Refrescando token de Google...")
       const tokens = await GoogleSignin.getTokens()
 
       if (tokens.idToken) {
-        console.log("Nuevo token de Google obtenido exitosamente")
+        console.log("[AuthContext] Nuevo token de Google obtenido")
         setAuthState((prev) => ({
           ...prev,
           googleIdToken: tokens.idToken,
@@ -157,45 +319,42 @@ const refreshGoogleToken = useCallback(async () => {
         throw new Error("No se pudo obtener un nuevo token de Google")
       }
     } catch (error) {
-      console.error("Error al refrescar token de Google:", error)
+      console.error("[AuthContext] Error al refrescar token de Google:", error)
       throw error
     }
   }, [])
+
   const autenticacionConGoogle = useCallback(
     async (roleDescription) => {
       try {
-        console.log("Refrescando token antes de autenticar...")
+        console.log("[AuthContext] Refrescando token antes de autenticar...")
         const freshToken = await refreshGoogleToken()
 
         const rolUsuario = await getRoleIdByDescription(roleDescription)
-        console.log(`Autenticando con rol: ${roleDescription} (ID: ${rolUsuario})`)
-const requestBody = {
-          idToken: freshToken, // Usando el token fresco en lugar del guardado
+        console.log(`[AuthContext] Autenticando con rol: ${roleDescription} (ID: ${rolUsuario})`)
+
+        const requestBody = {
+          idToken: freshToken,
           rolUsuario: rolUsuario,
         }
-        console.log(" Request body para registrarseConGoogle:", JSON.stringify(requestBody, null, 2))
-        console.log(" URL de la API:", `${API_BASE_URL}/api/Usuarios/registrarseConGoogle`)
 
         const response = await fetch(`${API_BASE_URL}/api/Usuarios/registrarseConGoogle`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-           body: JSON.stringify(requestBody),
+          body: JSON.stringify(requestBody),
         })
-
-        console.log(" Response status:", response.status)
-        console.log(" Response ok:", response.ok)
-     //   console.log(" Response headers:", JSON.stringify([...response.headers.entries()]))
 
         if (response.ok) {
           const result = await response.json()
-          console.log("Usuario autenticado exitosamente:", result)
-        if (result.jwtToken) {
-             await storeJwtToken(result.jwtToken)
+          console.log("[AuthContext] Usuario autenticado exitosamente")
+
+          if (result.jwtToken) {
+            await storeJwtToken(result.jwtToken)
             setAuthState((prev) => ({ ...prev, jwtToken: result.jwtToken }))
-            console.log("JWT token obtenido del registro y guardado")
           }
+
           const combinedUserData = {
             ...result.usuario,
             displayName: authState.googleUserData?.displayName,
@@ -204,54 +363,41 @@ const requestBody = {
             familyName: authState.googleUserData?.familyName,
           }
 
-          console.log("Datos combinados del usuario:", combinedUserData)
           await updateAuth(combinedUserData, true)
           return { success: true, usuario: combinedUserData }
         } else {
-         // const errorText = await response.text()
-         // throw new Error(`Error en autenticación: ${errorText}`)
-         let errorText = ""
+          let errorText = ""
           let errorJson = null
 
           try {
             errorText = await response.text()
-            console.log("Response error text:", errorText)
-
             if (errorText) {
               try {
                 errorJson = JSON.parse(errorText)
-                console.log("Response error JSON:", errorJson)
-              } catch (e) {
-                console.log("Error text is not JSON")
-              }
+              } catch (e) {}
             }
-          } catch (e) {
-            console.error("Error reading response text:", e)
-          }
+          } catch (e) {}
 
           const errorMessage = errorJson?.mensaje || errorJson?.message || errorText || "Error desconocido"
           throw new Error(`Error en autenticación (${response.status}): ${errorMessage}`)
         }
       } catch (error) {
-        console.error("Error en autenticacionConGoogle:", error)
-         console.error("Error stack:", error.stack)
+        console.error("[AuthContext] Error en autenticacionConGoogle:", error)
         throw error
       }
     },
-    [authState.googleUserData, updateAuth, refreshGoogleToken], // Agregando refreshGoogleToken a las dependencias,
+    [authState.googleUserData, updateAuth, refreshGoogleToken]
   )
 
   const loginWithGoogle = useCallback(async () => {
     setAuthState((prev) => ({ ...prev, isLoading: true }))
     try {
-      console.log("Iniciando proceso de login con Google")
+      console.log("[AuthContext] Iniciando proceso de login con Google")
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true })
-
       await GoogleSignin.signOut()
 
       const userInfo = await GoogleSignin.signIn()
-
-      console.log("Información de usuario de Google obtenida")
+      console.log("[AuthContext] Información de usuario de Google obtenida")
 
       if (!userInfo.idToken) {
         throw new Error("No se pudo obtener el idToken de Google Sign-In")
@@ -275,7 +421,7 @@ const requestBody = {
       const registeredUser = await iniciarSesionConGoogle(userInfo.idToken)
 
       if (registeredUser) {
-        console.log("Usuario registrado, actualizando estado de autenticación")
+        console.log("[AuthContext] Usuario registrado, actualizando estado")
 
         const combinedUserData = {
           ...registeredUser,
@@ -288,7 +434,7 @@ const requestBody = {
         await updateAuth(combinedUserData, true)
         return { success: true, user: combinedUserData, isRegistered: true }
       } else {
-        console.log("Usuario no registrado")
+        console.log("[AuthContext] Usuario no registrado")
         await updateAuth(googleUserData, false)
         return { success: true, user: googleUserData, isRegistered: false }
       }
@@ -300,14 +446,12 @@ const requestBody = {
         errorMessage.includes("Sign in action cancelled")
 
       if (isCancelled) {
-        console.log("Usuario canceló el inicio de sesión con Google")
-        // No mostrar error, solo limpiar el estado
+        console.log("[AuthContext] Usuario canceló el inicio de sesión")
         clearAuth()
         return { success: false, cancelled: true }
       }
 
-      // Para otros errores, sí mostrar el error
-      console.error("Error durante el inicio de sesión con Google:", error)
+      console.error("[AuthContext] Error durante el inicio de sesión:", error)
       clearAuth()
       throw error
     } finally {
@@ -317,7 +461,7 @@ const requestBody = {
 
   const buscarUsuarioPorId = useCallback(async (userId) => {
     try {
-      console.log("Buscando usuario por ID:", userId)
+      console.log("[AuthContext] Buscando usuario por ID:", userId)
       const response = await fetch(`${API_BASE_URL}/api/usuarios/buscarIdUsuario/${userId}`, {
         method: "GET",
         headers: {
@@ -327,14 +471,13 @@ const requestBody = {
 
       if (response.ok) {
         const user = await response.json()
-        console.log("Usuario encontrado:", user)
         return user
       } else {
         const errorText = await response.text()
         throw new Error(`Error al buscar usuario: ${errorText}`)
       }
     } catch (error) {
-      console.error("Error al buscar usuario:", error)
+      console.error("[AuthContext] Error al buscar usuario:", error)
       throw error
     }
   }, [])
@@ -342,14 +485,12 @@ const requestBody = {
   const actualizarUsuario = useCallback(
     async (userId, userData) => {
       try {
-        console.log("Actualizando usuario:", userId, userData)
+        console.log("[AuthContext] Actualizando usuario:", userId)
 
         const dataToSend = {
           ...userData,
           fechaCreacion: formatISODate(userData.fechaCreacion),
         }
-
-        console.log("Datos a enviar con fecha formateada:", dataToSend)
 
         const response = await fetch(`${API_BASE_URL}/api/usuarios/actualizar/${userId}`, {
           method: "PUT",
@@ -359,26 +500,18 @@ const requestBody = {
           body: JSON.stringify(dataToSend),
         })
 
-        console.log("Status de respuesta:", response.status)
-
         if (response.ok) {
           const responseText = await response.text()
-          console.log("Respuesta raw:", responseText)
-
           let updatedUser
           if (responseText.trim()) {
             try {
               updatedUser = JSON.parse(responseText)
             } catch (parseError) {
-              console.log("Error al parsear JSON, usando datos locales")
               updatedUser = dataToSend
             }
           } else {
-            console.log("Respuesta vacía, usando datos locales")
             updatedUser = dataToSend
           }
-
-          console.log("Usuario actualizado exitosamente:", updatedUser)
 
           const combinedUserData = {
             ...updatedUser,
@@ -395,17 +528,17 @@ const requestBody = {
           throw new Error(`Error al actualizar usuario: ${response.status} - ${errorText}`)
         }
       } catch (error) {
-        console.error("Error al actualizar usuario:", error)
+        console.error("[AuthContext] Error al actualizar usuario:", error)
         throw error
       }
     },
-    [updateAuth, authState.googleUserData],
+    [updateAuth, authState.googleUserData]
   )
 
   const eliminarUsuario = useCallback(
     async (userId) => {
       try {
-        console.log("Eliminando usuario:", userId)
+        console.log("[AuthContext] Eliminando usuario:", userId)
         const response = await fetch(`${API_BASE_URL}/api/usuarios/eliminar/${userId}`, {
           method: "DELETE",
           headers: {
@@ -414,7 +547,7 @@ const requestBody = {
         })
 
         if (response.ok) {
-          console.log("Usuario eliminado exitosamente")
+          console.log("[AuthContext] Usuario eliminado exitosamente")
           clearAuth()
           return { success: true }
         } else {
@@ -422,21 +555,20 @@ const requestBody = {
           throw new Error(`Error al eliminar usuario: ${errorText}`)
         }
       } catch (error) {
-        console.error("Error al eliminar usuario:", error)
+        console.error("[AuthContext] Error al eliminar usuario:", error)
         throw error
       }
     },
-    [clearAuth],
+    [clearAuth]
   )
-
 
   const logout = useCallback(async () => {
     try {
-      console.log("Cerrando sesión...")
+      console.log("[AuthContext] Cerrando sesión...")
       await GoogleSignin.signOut()
-      clearAuth()
+      await clearAuth()
     } catch (error) {
-      console.error("Error during logout:", error)
+      console.error("[AuthContext] Error during logout:", error)
     }
   }, [clearAuth])
 
@@ -452,7 +584,7 @@ const requestBody = {
         buscarUsuarioPorId,
         actualizarUsuario,
         eliminarUsuario,
-        
+        clearPendingPaymentNavigation,
       }}
     >
       {children}

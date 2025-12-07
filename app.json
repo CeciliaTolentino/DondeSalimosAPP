@@ -47,13 +47,25 @@
       "intentFilters": [
         {
           "action": "VIEW",
+          "autoVerify": true,
           "data": [
             {
-              "scheme": "dondesalimos"
+              "scheme": "dondesalimos",
+              "host": "payment",
+              "pathPrefix": "/"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
-        }
+        },
+  {
+    "action": "VIEW",
+    "data": [
+      {
+        "scheme": "dondesalimos"
+      }
+    ],
+    "category": ["BROWSABLE", "DEFAULT"]
+  }
       ]
     },
     "web": {

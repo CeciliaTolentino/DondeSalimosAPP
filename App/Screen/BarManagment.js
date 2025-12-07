@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from "react"
+import { useState, useEffect, useContext, useCallback } from "react"
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Modal,
-    Linking,
+  Linking,
   FlatList,
 } from "react-native"
 import { AntDesign, MaterialCommunityIcons } from "@expo/vector-icons"
@@ -21,31 +21,22 @@ import Apis from "../../Apis/Apis"
 import { validateCUIT, formatCUIT } from "../../utils/cuitValidator"
 import PublicidadModal from "../../Components/advertising/publicidadModal"
 import { Picker } from "@react-native-picker/picker"
-const ComercioCard = ({ comercio, onPress }) => {
- const convertBase64ToImage = (base64String) => {
-    if (!base64String) return null
 
- 
+const ComercioCard = ({ comercio, onPress }) => {
+  const convertBase64ToImage = (base64String) => {
+    if (!base64String) return null
     if (base64String.startsWith("data:image")) {
       return base64String
     }
-
-
     return `data:image/jpeg;base64,${base64String}`
   }
 
   const getImageSource = () => {
-    
-
     if (comercio.foto) {
-     
       const imageUri = convertBase64ToImage(comercio.foto)
-     
       return { uri: imageUri }
     }
-
-   
- return require("../../assets/placeholder.jpg")
+    return require("../../assets/placeholder.jpg")
   }
 
   const isApproved = comercio.estado === true
@@ -77,7 +68,15 @@ const ComercioCard = ({ comercio, onPress }) => {
 }
 
 const BarManagement = () => {
-  const { user, isAuthenticated, isBarOwner } = useContext(AuthContext)
+ 
+  const { 
+    user, 
+    isAuthenticated, 
+    isBarOwner,
+    pendingPaymentNavigation,        
+    clearPendingPaymentNavigation    
+  } = useContext(AuthContext)
+
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -89,7 +88,6 @@ const BarManagement = () => {
   const [publicidadesList, setPublicidadesList] = useState([])
   const [selectedPublicidad, setSelectedPublicidad] = useState(null)
 
- 
   const [nombre, setNombre] = useState("")
   const [direccion, setDireccion] = useState("")
   const [capacidad, setCapacidad] = useState("")
@@ -100,7 +98,7 @@ const BarManagement = () => {
   const [businessImage, setBusinessImage] = useState(null)
   const [businessImageBase64, setBusinessImageBase64] = useState(null)
 
- const [newComercioData, setNewComercioData] = useState({
+  const [newComercioData, setNewComercioData] = useState({
     ID_TipoComercio: 1,
     Nombre: "",
     Capacidad: "",
@@ -115,115 +113,76 @@ const BarManagement = () => {
 
   const [newComercioImage, setNewComercioImage] = useState(null)
   const [newComercioImageBase64, setNewComercioImageBase64] = useState(null)
-const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
+  const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
   const [newComercioHoraCierre, setNewComercioHoraCierre] = useState("")
 
   const [activeTab, setActiveTab] = useState("comercios")
   const [todasPublicidades, setTodasPublicidades] = useState([])
+
+  
+  useEffect(() => {
+    if (pendingPaymentNavigation && isAuthenticated && comerciosList.length > 0) {
+      console.log("[BarManagement] Procesando pago desde deep link:", pendingPaymentNavigation)
+      
+      const { status, paymentId, preferenceId } = pendingPaymentNavigation
+      
+      if (status === "success" && paymentId) {
+        Apis.verificarYActivarPago(paymentId, preferenceId)
+          .then((response) => {
+            if (response.status === 200 && response.data?.success) {
+              console.log("[BarManagement] Pago verificado exitosamente")
+              setActiveTab("publicidades")
+              loadTodasPublicidades()
+              Alert.alert(
+                "¡Pago exitoso!",
+                "Tu publicidad ha sido pagada y está pendiente de aprobación del administrador.",
+                [{ text: "Ver mis publicidades" }]
+              )
+            } else {
+              Alert.alert(
+                "Error al verificar pago",
+                response.data?.message || "Hubo un problema al verificar tu pago.",
+                [{ text: "Entendido" }]
+              )
+            }
+          })
+          .catch((error) => {
+            console.error("[BarManagement] Error verificando pago:", error)
+            Alert.alert(
+              "Error",
+              "Hubo un problema al procesar el pago. Verifica el estado de tu publicidad.",
+              [{ text: "Entendido", onPress: () => setActiveTab("publicidades") }]
+            )
+          })
+      } else if (status === "failure") {
+        Alert.alert(
+          "Pago no completado",
+          "El pago no pudo ser procesado. Tu publicidad quedará pendiente de pago.",
+          [{ text: "Entendido", onPress: () => setActiveTab("publicidades") }]
+        )
+      } else if (status === "pending") {
+        Alert.alert(
+          "Pago pendiente",
+          "Tu pago está siendo procesado. Te notificaremos cuando se confirme.",
+          [{ text: "Entendido", onPress: () => setActiveTab("publicidades") }]
+        )
+      }
+      
+      clearPendingPaymentNavigation()
+    }
+  }, [pendingPaymentNavigation, isAuthenticated, comerciosList.length])
+
+
   useEffect(() => {
     if (isAuthenticated && user) {
       checkUserAccess()
     } else {
       setIsLoading(false)
     }
+  }, [isAuthenticated, user])
 
-    const handleDeepLink = async (event) => {
-      try {
-        const url = event.url
-        console.log("Deep link recibido:", url)
+  
 
-        if (url.includes("payment_id") && url.includes("preference_id")) {
-          const paymentId = url.match(/payment_id=([^&]+)/)?.[1]
-          const preferenceId = url.match(/preference_id=([^&]+)/)?.[1]
-
-          if (paymentId && preferenceId) {
-            console.log("Verificando pago:", { paymentId, preferenceId })
-
-            const verifyResponse = await Apis.verificarYActivarPago(paymentId, preferenceId)
-
-            if (verifyResponse.status === 200 && verifyResponse.data.success) {
-              const publicidadId = verifyResponse.data.publicidadId
-
-              console.log("Pago verificado, activando publicidad:", publicidadId)
-
-              const publicidadResponse = await Apis.obtenerPublicidadesPorId(publicidadId)
-              const publicidadData = publicidadResponse.data
-
-              console.log("Publicidad obtenida:", publicidadData)
-
-              await Apis.actualizarPublicidad(publicidadId, {
-                descripcion: publicidadData.descripcion,
-                visualizaciones: publicidadData.visualizaciones,
-                tiempo: publicidadData.tiempo,
-                estado: publicidadData.estado, // Keep original estado (true if already approved, false if not)
-                fechaCreacion: publicidadData.fechaCreacion,
-                iD_Comercio: publicidadData.iD_Comercio,
-                iD_TipoComercio: publicidadData.iD_TipoComercio,
-                foto: publicidadData.imagen,
-                pago: true,
-              })
-
-              console.log("Publicidad actualizada con pago exitoso")
-
-              setPublicidadModalVisible(false)
-              setSelectedPublicidad(null)
-
-              if (publicidadData.estado) {
-                Alert.alert("¡Pago exitoso!", "Tu pago ha sido procesado. La publicidad ya está activa.", [
-                  { text: "OK", onPress: () => loadTodasPublicidades() },
-                ])
-              } else {
-                Alert.alert(
-                  "¡Pago exitoso!",
-                  "Tu pago ha sido procesado. La publicidad está pendiente de aprobación del administrador.",
-                  [{ text: "OK", onPress: () => loadTodasPublicidades() }],
-                )
-              }
-            } else {
-              console.error("Error en la respuesta de verificación de pago:", verifyResponse.data)
-              Alert.alert(
-                "Error al procesar el pago",
-                verifyResponse.data?.message || "Hubo un problema al verificar tu pago. Por favor, contacta a soporte.",
-                [{ text: "Entendido" }],
-              )
-            }
-          }
-        } else if (url.includes("payment/failure")) {
-          setPublicidadModalVisible(false)
-          setSelectedPublicidad(null)
-
-          Alert.alert("Pago Rechazado", "El pago no pudo ser procesado. Tu publicidad quedará pendiente de pago.", [
-            {
-              text: "Entendido",
-              onPress: () => {
-                if (selectedComercio) {
-                  loadPublicidades(selectedComercio.iD_Comercio)
-                }
-              },
-            },
-          ])
-        } else if (url.includes("payment/pending")) {
-          Alert.alert("Pago Pendiente", "Tu pago está siendo procesado. Te notificaremos cuando se confirme.", [
-            { text: "Entendido" },
-          ])
-        }
-      } catch (error) {
-        console.error("Error al manejar deep link:", error)
-        Alert.alert("Error", "Hubo un problema al procesar la notificación de pago.", [{ text: "Entendido" }])
-        setPublicidadModalVisible(false)
-        setSelectedPublicidad(null)
-      }
-    }
-
-    const subscription = Linking.addEventListener("url", handleDeepLink)
-   
-
-    return () => {
-      subscription.remove()
-    }
-  }, [isAuthenticated, user, selectedComercio])
-
-  // Función para convertir imagen a base64
   const convertImageToBase64 = async (imageUri) => {
     try {
       const base64 = await FileSystem.readAsStringAsync(imageUri, {
@@ -236,24 +195,16 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     }
   }
 
-
- const convertBase64ToImage = (base64String) => {
+  const convertBase64ToImage = (base64String) => {
     if (!base64String) return null
-
- 
     if (base64String.startsWith("data:image")) {
       return base64String
     }
-
- 
     return `data:image/jpeg;base64,${base64String}`
   }
 
-
   const formatTimeWithSeconds = (timeString) => {
-   if (!timeString || timeString.trim() === "") return null
-
- 
+    if (!timeString || timeString.trim() === "") return null
     if (timeString.includes(":")) {
       const parts = timeString.split(":")
       if (parts.length === 3) {
@@ -271,8 +222,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     return timeString
   }
 
-
-
   const formatTimeForDisplay = (timeString) => {
     if (!timeString) return ""
     const parts = timeString.split(":")
@@ -281,16 +230,16 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     }
     return timeString
   }
- const formatDateDDMMYY = (date) => {
-    if (!date) return "Sin fecha"
 
+  const formatDateDDMMYY = (date) => {
+    if (!date) return "Sin fecha"
     const d = new Date(date)
     const day = String(d.getDate()).padStart(2, "0")
-    const month = String(d.getMonth() + 1).padStart(2, "0") // Months are 0-indexed
-    const year = String(d.getFullYear()).slice(-2) // Get last 2 digits of year
-
+    const month = String(d.getMonth() + 1).padStart(2, "0")
+    const year = String(d.getFullYear()).slice(-2)
     return `${day}/${month}/${year}`
   }
+
   const checkUserAccess = async () => {
     try {
       if (!isBarOwner || user.iD_RolUsuario !== 3) {
@@ -307,14 +256,11 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
   const loadComerciosList = async () => {
     try {
       console.log("Buscando comercios para usuario:", user.iD_Usuario)
-
       const response = await Apis.obtenerComerciosListado()
 
       if (response.status === 200) {
         const comercios = response.data
         const userComercios = comercios.filter((comercio) => comercio.iD_Usuario === user.iD_Usuario)
-
-      //  console.log("Comercios encontrados:", userComercios)
         setComerciosList(userComercios)
       } else {
         setComerciosList([])
@@ -330,7 +276,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
   const handleComercioPress = (comercio) => {
     setSelectedComercio(comercio)
     setModalVisible(true)
-    // Cargar datos para edición
     setNombre(comercio.nombre || "")
     setDireccion(comercio.direccion || "")
     setCapacidad(comercio.capacidad?.toString() || "")
@@ -367,12 +312,11 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         if (imageType === "businessImage" || imageType === "newComercioImage") {
           const base64 = await convertImageToBase64(imageUri)
           if (base64) {
-             if (imageType === "businessImage") {
-            setBusinessImageBase64(base64)
+            if (imageType === "businessImage") {
+              setBusinessImageBase64(base64)
             } else if (imageType === "newComercioImage") {
               setNewComercioImageBase64(base64)
             }
-            console.log("Imagen convertida a base64 exitosamente")
           } else {
             Alert.alert("Error", "No se pudo procesar la imagen.")
           }
@@ -383,8 +327,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
       Alert.alert("Error", "No se pudo seleccionar la imagen.")
     }
   }
-
- 
 
   const handleCancelEdit = () => {
     if (selectedComercio) {
@@ -414,6 +356,11 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     return timeRegex.test(timeString)
   }
 
+  const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+
   const handleSave = async () => {
     if (!nombre.trim() || !direccion.trim()) {
       Alert.alert("Error", "El nombre y la dirección son obligatorios.")
@@ -432,15 +379,13 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
     setIsSaving(true)
     try {
-     
       const isApproved = selectedComercio.estado === true
       const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
 
       const cleanTipoDocumento = selectedComercio.tipoDocumento.replace(/\s+/g, "")
-      const cleanTelefono = selectedComercio.telefono.replace(/\s+/g, "") 
-      const cleanNroDocumento = selectedComercio.nroDocumento.replace(/-/g, "") 
+      const cleanTelefono = selectedComercio.telefono.replace(/\s+/g, "")
+      const cleanNroDocumento = selectedComercio.nroDocumento.replace(/-/g, "")
 
-     // Solo validar CUIT si el comercio NO está aprobado
       if (!isApproved && cleanTipoDocumento === "CUIT") {
         const cuitValidation = validateCUIT(cleanNroDocumento)
         if (!cuitValidation.valid) {
@@ -450,11 +395,9 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         }
       }
 
- //Formatear horarios correctamente, devolviendo null si están vacíos
       const horaIngresoFormatted = formatTimeWithSeconds(openingHours)
       const horaCierreFormatted = formatTimeWithSeconds(closingHours)
 
-    
       const updatedComercio = {
         iD_Comercio: selectedComercio.iD_Comercio,
         nombre: nombre.trim(),
@@ -466,27 +409,22 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         direccion: direccion.trim(),
         correo: selectedComercio.correo,
         telefono: cleanTelefono,
-         estado: isRechazado ? false : selectedComercio.estado,
+        estado: isRechazado ? false : selectedComercio.estado,
         fechaCreacion: selectedComercio.fechaCreacion,
-         horaIngreso: horaIngresoFormatted,
+        horaIngreso: horaIngresoFormatted,
         horaCierre: horaCierreFormatted,
         foto: businessImageBase64 || selectedComercio.foto || "",
         iD_Usuario: selectedComercio.iD_Usuario,
         iD_TipoComercio: selectedComercio.iD_TipoComercio,
         usuario: selectedComercio.usuario || null,
         tipoComercio: selectedComercio.tipoComercio || null,
-       MotivoRechazo: isRechazado ? null : (selectedComercio.motivoRechazo ?? null),
+        MotivoRechazo: isRechazado ? null : (selectedComercio.motivoRechazo ?? null),
       }
-
-      console.log("Actualizando comercio:", {
-        ...updatedComercio,
-        foto: updatedComercio.foto ? `[Base64 string of length: ${updatedComercio.foto.length}]` : "No image",
-      })
 
       const response = await Apis.actualizarComercio(selectedComercio.iD_Comercio, updatedComercio)
 
       if (response.status === 200 || response.status === 201 || response.status === 204) {
-   if (isRechazado) {
+        if (isRechazado) {
           Alert.alert(
             "Éxito",
             "La información del comercio ha sido actualizada y enviada nuevamente para aprobación del administrador.",
@@ -495,7 +433,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           Alert.alert("Éxito", "La información del comercio ha sido actualizada.")
         }
         await loadComerciosList()
-        // Obtener el comercio actualizado del backend
+
         const updatedComerciosListResponse = await Apis.obtenerComerciosListado()
         if (updatedComerciosListResponse.status === 200) {
           const comercioActualizado = updatedComerciosListResponse.data.find(
@@ -503,10 +441,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           )
 
           if (comercioActualizado) {
-            // Actualizar selectedComercio con los datos frescos del backend
             setSelectedComercio(comercioActualizado)
-
-            // Actualizar los campos de visualización con los nuevos datos
             setNombre(comercioActualizado.nombre || "")
             setDireccion(comercioActualizado.direccion || "")
             setCapacidad(comercioActualizado.capacidad?.toString() || "")
@@ -527,7 +462,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         }
 
         setIsEditing(false)
-
         if (isRechazado) {
           setModalVisible(false)
         }
@@ -545,7 +479,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
   const handleCreateNewComercio = () => {
     setCreateModalVisible(true)
-    // Resetear datos del formulario
     setNewComercioData({
       ID_TipoComercio: 1,
       Nombre: "",
@@ -558,7 +491,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
       Correo: "",
       Telefono: "",
     })
-    
     setNewComercioImage(null)
     setNewComercioImageBase64(null)
     setNewComercioHoraIngreso("")
@@ -568,7 +500,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
   useEffect(() => {
     if (user && user.iD_Usuario) {
       loadComerciosList()
-      
     }
   }, [user])
 
@@ -578,15 +509,12 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     }
   }, [activeTab, comerciosList])
 
-  const loadTodasPublicidades = async () => {
+  const loadTodasPublicidades = useCallback(async () => {
     try {
       console.log("Cargando todas las publicidades del usuario...")
       const response = await Apis.obtenerPublicidadesListado()
       if (response.status === 200) {
         const allPublicidades = response.data
-        const now = new Date()
-
-        // Filtrar solo las publicidades de los comercios del usuario
         const comerciosIds = comerciosList.map((c) => c.iD_Comercio)
         const userPublicidades = allPublicidades
           .filter((pub) => comerciosIds.includes(pub.iD_Comercio))
@@ -596,7 +524,6 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             const fechaExpiracion = new Date(fechaCreacion)
             fechaExpiracion.setDate(fechaExpiracion.getDate() + dias)
 
-            // Encontrar el nombre del comercio
             const comercio = comerciosList.find((c) => c.iD_Comercio === pub.iD_Comercio)
 
             return {
@@ -614,12 +541,299 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
       console.error("Error al cargar todas las publicidades:", error)
       setTodasPublicidades([])
     }
+  }, [comerciosList])
+
+  const loadPublicidades = async (comercioId) => {
+    try {
+      const response = await Apis.obtenerPublicidadesListado()
+      if (response.status === 200) {
+        const allPublicidades = response.data
+        const now = new Date()
+
+        const comercioPublicidades = allPublicidades
+          .filter((pub) => pub.iD_Comercio === comercioId)
+          .map((pub) => {
+            const fechaCreacion = new Date(pub.fechaCreacion || pub.FechaCreacion)
+            const dias = getDiasFromTiempo(pub.tiempo)
+            const fechaExpiracion = new Date(fechaCreacion)
+            fechaExpiracion.setDate(fechaExpiracion.getDate() + dias)
+
+            return {
+              ...pub,
+              fechaExpiracionCalculada: fechaExpiracion,
+            }
+          })
+          .filter((pub) => {
+            if (!pub.estado) return true
+            return pub.fechaExpiracionCalculada > now
+          })
+
+        setPublicidadesList(comercioPublicidades)
+      }
+    } catch (error) {
+      console.error("Error al cargar publicidades:", error)
+      setPublicidadesList([])
+    }
   }
 
-  
+  const handleEditPublicidad = (publicidad) => {
+    if (publicidad.pago && !publicidad.estado && publicidad.motivoRechazo) {
+      Alert.alert(
+        "Editar Publicidad Rechazada",
+        "Esta publicidad ya fue pagada. Puedes actualizar la imagen para que sea revisada nuevamente por el administrador.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Editar Imagen",
+            onPress: () => {
+              setSelectedPublicidad({ ...publicidad, isRejectedPaid: true })
+              setPublicidadModalVisible(true)
+            },
+          },
+        ],
+      )
+    } else {
+      setSelectedPublicidad(publicidad)
+      setPublicidadModalVisible(true)
+    }
+  }
+
+  const handleEditRejectedUnpaid = (pub) => {
+    const comercio = comerciosList.find((c) => c.iD_Comercio === pub.iD_Comercio)
+    if (comercio) {
+      setSelectedComercio(comercio)
+    }
+    setSelectedPublicidad({
+      ...pub,
+      isRejectedUnpaid: true,
+    })
+    setPublicidadModalVisible(true)
+  }
+
+  const handleDeletePublicidad = (publicidad) => {
+    Alert.alert("Eliminar Publicidad", "¿Estás seguro que deseas eliminar esta publicidad?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await Apis.eliminarPublicidad(publicidad.iD_Publicidad)
+            Alert.alert("Éxito", "La publicidad ha sido eliminada correctamente.")
+            if (selectedComercio) {
+              await loadPublicidades(selectedComercio.iD_Comercio)
+            }
+            if (activeTab === "publicidades") {
+              await loadTodasPublicidades()
+            }
+          } catch (error) {
+            Alert.alert("Error", "No se pudo eliminar la publicidad.")
+          }
+        },
+      },
+    ])
+  }
+
+  // =====================================================
+  // CAMBIO #4: Precios bajos para pruebas ($100, $150, $200)
+  // =====================================================
+  const handlePayPublicidad = async (publicidad) => {
+    try {
+      const durations = [
+        { days: 7, label: "1 Semana", price: 100 },
+        { days: 15, label: "15 Días", price: 150 },
+        { days: 30, label: "1 Mes", price: 200 },
+      ]
+
+      let duration = durations[0]
+      const tiempo = publicidad.tiempo
+      if (tiempo.includes("15")) duration = durations[1]
+      else if (tiempo.includes("30") || tiempo.includes("23")) duration = durations[2]
+
+      const preferenciaResponse = await Apis.crearPreferenciaPago({
+        titulo: `Publicidad ${duration.label} - ${publicidad.nombreComercio || "Comercio"}`,
+        precio: duration.price,
+        publicidadId: publicidad.iD_Publicidad,
+      })
+
+      if (preferenciaResponse.data && preferenciaResponse.data.init_point) {
+        const checkoutUrl = preferenciaResponse.data.init_point
+        const supported = await Linking.canOpenURL(checkoutUrl)
+
+        if (supported) {
+          await Linking.openURL(checkoutUrl)
+          Alert.alert(
+            "Redirigido a Mercado Pago",
+            "Completa el pago para activar tu publicidad. Una vez que termines, regresa a la app.",
+            [{ text: "Entendido" }]
+          )
+        } else {
+          Alert.alert("Error", "No se pudo abrir el link de pago.")
+        }
+      }
+    } catch (error) {
+      console.error("Error al generar link de pago:", error)
+      Alert.alert("Error", "No se pudo generar el link de pago. Intenta nuevamente.")
+    }
+  }
+
+  const getTiempoLabel = (tiempo) => {
+    if (!tiempo) return "Duración desconocida"
+    const normalizedTiempo = tiempo.split(".")[0]
+    const parts = normalizedTiempo.split(":")
+    const dias = parts.length > 0 ? Number.parseInt(parts[0]) : 0
+
+    if (dias === 7) return "1 Semana"
+    else if (dias === 15) return "15 Días"
+    else if (dias >= 23 && dias <= 31) return "1 Mes"
+
+    return tiempo
+  }
+
+  const getDiasFromTiempo = (tiempo) => {
+    if (!tiempo) return 0
+    const normalizedTiempo = tiempo.split(".")[0]
+    const parts = normalizedTiempo.split(":")
+    if (parts.length > 0) {
+      return Number.parseInt(parts[0]) || 0
+    }
+    return 0
+  }
+
+  const handleSubmitNewComercio = async () => {
+    try {
+      if (
+        !newComercioData.Nombre ||
+        !newComercioData.NroDocumento ||
+        !newComercioData.Direccion ||
+        !newComercioData.Telefono ||
+        !newComercioData.Correo
+      ) {
+        Alert.alert("Error", "Por favor, complete todos los campos obligatorios.")
+        return
+      }
+      if (!validateEmail(newComercioData.Correo)) {
+        Alert.alert(
+          "Error de validación",
+          "El correo electrónico no tiene un formato válido.",
+        )
+        return
+      }
+      const cleanNroDocumento = newComercioData.NroDocumento.replace(/-/g, "")
+      const cuitValidation = validateCUIT(cleanNroDocumento)
+      if (!cuitValidation.valid) {
+        Alert.alert("Error de validación", cuitValidation.message)
+        return
+      }
+
+      if (newComercioHoraIngreso && !validateTimeFormat(newComercioHoraIngreso)) {
+        Alert.alert("Error", "El horario de apertura debe tener el formato HH:MM")
+        return
+      }
+
+      if (newComercioHoraCierre && !validateTimeFormat(newComercioHoraCierre)) {
+        Alert.alert("Error", "El horario de cierre debe tener el formato HH:MM")
+        return
+      }
+
+      setIsSaving(true)
+
+      const horaIngresoFormatted =
+        newComercioHoraIngreso && newComercioHoraIngreso.trim() !== ""
+          ? formatTimeWithSeconds(newComercioHoraIngreso)
+          : null
+      const horaCierreFormatted =
+        newComercioHoraCierre && newComercioHoraCierre.trim() !== ""
+          ? formatTimeWithSeconds(newComercioHoraCierre)
+          : null
+
+      const comercioDataToSend = {
+        iD_Comercio: 0,
+        nombre: newComercioData.Nombre,
+        capacidad: Number.parseInt(newComercioData.Capacidad) || 0,
+        mesas: Number.parseInt(newComercioData.Mesas) || 0,
+        generoMusical: newComercioData.GeneroMusical,
+        tipoDocumento: newComercioData.TipoDocumento.replace(/\s+/g, ""),
+        nroDocumento: formatCUIT(newComercioData.NroDocumento),
+        direccion: newComercioData.Direccion,
+        correo: newComercioData.Correo,
+        telefono: newComercioData.Telefono,
+        estado: false,
+        fechaCreacion: new Date().toISOString(),
+        horaIngreso: horaIngresoFormatted,
+        horaCierre: horaCierreFormatted,
+        foto: newComercioImageBase64 || "",
+        iD_Usuario: user.iD_Usuario,
+        iD_TipoComercio: newComercioData.ID_TipoComercio,
+      }
+
+      const response = await Apis.crearComercio(comercioDataToSend)
+
+      if (response.status === 200 || response.status === 201) {
+        Alert.alert(
+          "Comercio Creado",
+          "Su comercio ha sido registrado exitosamente y está pendiente de aprobación.",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                setCreateModalVisible(false)
+                loadComerciosList()
+              },
+            },
+          ],
+        )
+      } else {
+        throw new Error("Error al crear comercio")
+      }
+    } catch (error) {
+      let errorMessage = "No se pudo crear el comercio."
+      if (error.response?.data) {
+        const errorData = error.response.data
+        if (errorData.correo) {
+          errorMessage = Array.isArray(errorData.correo) ? errorData.correo[0] : errorData.correo
+        } else if (typeof errorData === "string" && errorData.includes("CUIT")) {
+          errorMessage = "Ya existe un comercio registrado con este CUIT."
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
+      }
+      Alert.alert("Error al registrar comercio", errorMessage, [{ text: "Entendido" }])
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDeleteComercio = () => {
+    Alert.alert(
+      "Confirmar eliminación",
+      `¿Está seguro que desea eliminar el comercio "${selectedComercio.nombre}"?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const response = await Apis.eliminarComercio(selectedComercio.iD_Comercio)
+              if (response.status === 200 || response.status === 201 || response.status === 204) {
+                Alert.alert("Comercio eliminado", "Su comercio ha sido eliminado exitosamente.")
+                setModalVisible(false)
+                await loadComerciosList()
+              }
+            } catch (error) {
+              Alert.alert("Error", "No se pudo eliminar el comercio.")
+            }
+          },
+        },
+      ],
+    )
+  }
+
+  // =====================================================
+  // RENDER PUBLICIDADES PANEL - Copiá de tu archivo original
+  // =====================================================
   const renderPublicidadesPanel = () => {
-    // Agrupar publicidades por comercio Y estado
-    const publicidadesPorComercio = {}
     const publicidadesPendientes = []
     const publicidadesActivas = []
     const publicidadesRechazadas = []
@@ -628,30 +842,19 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     todasPublicidades.forEach((pub) => {
       const isExpired = pub.fechaExpiracionCalculada < new Date()
 
-      // Clasificar por estado
       if (pub.isRechazada) {
         publicidadesRechazadas.push(pub)
       } else if (!pub.estado && pub.pago) {
-        publicidadesPendientes.push(pub) // Pagada pero pendiente de aprobación
+        publicidadesPendientes.push(pub)
       } else if (!pub.estado && !pub.pago) {
-        publicidadesPendientes.push(pub) // Pendiente de pago y aprobación
+        publicidadesPendientes.push(pub)
       } else if (pub.estado && !pub.pago) {
-        publicidadesPendientes.push(pub) // Aprobada pero pendiente de pago
-
+        publicidadesPendientes.push(pub)
       } else if (pub.estado && pub.pago && !isExpired) {
-        publicidadesActivas.push(pub) // Activa y pagada
+        publicidadesActivas.push(pub)
       } else if (isExpired) {
         publicidadesExpiradas.push(pub)
       }
-
-      // También mantener agrupación por comercio para la vista original
-      if (!publicidadesPorComercio[pub.iD_Comercio]) {
-        publicidadesPorComercio[pub.iD_Comercio] = {
-          nombreComercio: pub.nombreComercio,
-          publicidades: [],
-        }
-      }
-      publicidadesPorComercio[pub.iD_Comercio].publicidades.push(pub)
     })
 
     const getPublicidadImageSource = (pub) => {
@@ -677,9 +880,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           {pub.isRechazada && (
             <View style={styles.publicidadRejectionBanner}>
               <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
-          
-                <Text style={styles.publicidadRejectionMessage}>{pub.motivoRechazo}</Text>
-              
+              <Text style={styles.publicidadRejectionMessage}>{pub.motivoRechazo}</Text>
             </View>
           )}
 
@@ -693,23 +894,19 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
             <View style={styles.publicidadDetailsLarge}>
               <Text style={styles.publicidadTiempoLarge}>{getTiempoLabel(pub.tiempo)}</Text>
-
               <Text style={styles.publicidadComercioName}>{pub.nombreComercio}</Text>
-           
               <Text style={styles.publicidadDescription}>
                 {pub.descripcion?.substring(0, 100) || "Sin descripción"}
                 {pub.descripcion?.length > 100 && "..."}
               </Text>
 
               <Text style={styles.publicidadViewsLarge}>
-                <MaterialCommunityIcons name="eye" size={16} color="#D838F5" /> {pub.visualizaciones || 0}{" "}
-                visualizaciones
+                <MaterialCommunityIcons name="eye" size={16} color="#D838F5" /> {pub.visualizaciones || 0} visualizaciones
               </Text>
 
               <Text style={styles.publicidadFechaExpiracion}>Vence: {fechaExpiracionStr}</Text>
 
-              {/* Badges de estado */}
-               {pub.pago && (
+              {pub.pago && (
                 <View style={[styles.publicidadStatusBadge, styles.publicidadPagaBadge]}>
                   <Text style={styles.publicidadPagaText}>💰 Paga</Text>
                 </View>
@@ -735,45 +932,53 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
 
               {pub.estado && pub.pago && !isExpired && (
                 <View style={[styles.publicidadStatusBadge, styles.publicidadActivaBadge]}>
-                  <Text style={styles.publicidadActivaText}> Activa</Text>
+                  <Text style={styles.publicidadActivaText}>✅ Activa</Text>
                 </View>
               )}
 
               {isExpired && (
                 <>
-                <View style={[styles.publicidadStatusBadge, styles.publicidadExpiradaBadge]}>
-                  <Text style={styles.publicidadExpiradaText}>⌛ Expirada</Text>
-                </View>
+                  <View style={[styles.publicidadStatusBadge, styles.publicidadExpiradaBadge]}>
+                    <Text style={styles.publicidadExpiradaText}>⌛ Expirada</Text>
+                  </View>
                   <View style={{ height: 12 }} />
                 </>
               )}
-             {pub.estado && !pub.pago && !pub.isRechazada && (
+
+              {pub.estado && !pub.pago && !pub.isRechazada && (
                 <TouchableOpacity style={styles.publicidadPayButton} onPress={() => handlePayPublicidad(pub)}>
                   <MaterialCommunityIcons name="credit-card" size={18} color="#fff" />
                   <Text style={styles.publicidadPayButtonText}>Pagar Ahora</Text>
                 </TouchableOpacity>
               )}
+
+              {!pub.estado && !pub.pago && !pub.isRechazada && (
+                <TouchableOpacity style={styles.publicidadPayButton} onPress={() => handlePayPublicidad(pub)}>
+                  <MaterialCommunityIcons name="credit-card" size={18} color="#fff" />
+                  <Text style={styles.publicidadPayButtonText}>Pagar Ahora</Text>
+                </TouchableOpacity>
+              )}
+
               {pub.isRechazada && pub.pago && (
                 <TouchableOpacity style={styles.publicidadEditButton} onPress={() => handleEditPublicidad(pub)}>
                   <MaterialCommunityIcons name="pencil" size={18} color="#fff" />
                   <Text style={styles.publicidadEditButtonText}>Editar Imagen</Text>
                 </TouchableOpacity>
               )}
-{pub.isRechazada && !pub.pago && (
-                <TouchableOpacity
-                  style={styles.publicidadEditPayButton}
-                  onPress={() => handleEditRejectedUnpaid(pub)}
-                >
+
+              {pub.isRechazada && !pub.pago && (
+                <TouchableOpacity style={styles.publicidadEditPayButton} onPress={() => handleEditRejectedUnpaid(pub)}>
                   <MaterialCommunityIcons name="pencil" size={18} color="#fff" />
                   <Text style={styles.publicidadEditPayButtonText}>Editar y Pagar</Text>
                 </TouchableOpacity>
               )}
+
               {isExpired && (
                 <TouchableOpacity
                   style={styles.publicidadDeleteButtonSmall}
-                  onPress={() => handleDeletePublicidad(pub.iD_Publicidad)}
+                  onPress={() => handleDeletePublicidad(pub)}
                 >
-                   <MaterialCommunityIcons name="delete" size={18} color="#fff" />
+                  <MaterialCommunityIcons name="delete" size={18} color="#fff" />
                   <Text style={styles.deletePublicidadButtonText}>Eliminar</Text>
                 </TouchableOpacity>
               )}
@@ -794,94 +999,27 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           </View>
         ) : (
           <>
-            {/* Sección de Publicidades Pendientes */}
             {publicidadesPendientes.length > 0 && (
-
-											   
-																						 
-																		   
-
-						
-					   
-										   
-																									   
-				   
-										 
               <View style={styles.publicidadesSection}>
-																								
                 <View style={styles.sectionHeaderContainer}>
-																								   
-																									
-							   
-							 
-					  
-
-															   
-							
-															  
-														   
-																			   
-										  
-						
-
-															   
-																									  
-																  
                   <MaterialCommunityIcons name="clock-outline" size={24} color="#ffc107" />
-										 
-							   
                   <Text style={styles.sectionHeaderTitle}>
-                     Pendientes de Aprobación ({publicidadesPendientes.length})
-							   
-
-												   
-											 
-																										
+                    Pendientes ({publicidadesPendientes.length})
                   </Text>
                 </View>
-						  
-																		
-																												  
                 <Text style={styles.sectionDescription}>
-                  Estas publicidades están esperando ser revisadas por el administrador.
-						  
-
-																		   
-																	 
+                  Estas publicidades están esperando pago o aprobación del administrador.
                 </Text>
                 {publicidadesPendientes.map(renderPublicidadCard)}
-						  
-						
-																  
-																									 
-																					   
-								 
-						  
-									   
-																									   
-																						   
               </View>
             )}
-					  
-														   
-																  
-																				
-																					 
-																					
-								 
-						  
 
-					   
-
-            {/* Sección de Publicidades Activas */}
             {publicidadesActivas.length > 0 && (
-										   
               <View style={styles.publicidadesSection}>
                 <View style={styles.sectionHeaderContainer}>
-						   
                   <MaterialCommunityIcons name="check-circle" size={24} color="#4caf50" />
                   <Text style={[styles.sectionHeaderTitle, { color: "#4caf50" }]}>
-                     Activas ({publicidadesActivas.length})
+                    Activas ({publicidadesActivas.length})
                   </Text>
                 </View>
                 <Text style={styles.sectionDescription}>
@@ -891,12 +1029,9 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
               </View>
             )}
 
-            {/* Sección de Publicidades Rechazadas */}
             {publicidadesRechazadas.length > 0 && (
-										 
               <View style={styles.publicidadesSection}>
                 <View style={styles.sectionHeaderContainer}>
-						 
                   <MaterialCommunityIcons name="alert-circle" size={24} color="#ff6b6b" />
                   <Text style={[styles.sectionHeaderTitle, { color: "#ff6b6b" }]}>
                     Rechazadas ({publicidadesRechazadas.length})
@@ -908,20 +1043,16 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
                 {publicidadesRechazadas.map(renderPublicidadCard)}
               </View>
             )}
-				 
-					 
 
-            {/* Sección de Publicidades Expiradas */}
             {publicidadesExpiradas.length > 0 && (
               <View style={styles.publicidadesSection}>
                 <View style={styles.sectionHeaderContainer}>
-                  
                   <Text style={[styles.sectionHeaderTitle, { color: "#9e9e9e" }]}>
                     ⌛ Expiradas ({publicidadesExpiradas.length})
                   </Text>
                 </View>
                 <Text style={styles.sectionDescription}>
-                  Estas publicidades ya cumplieron su período de vigencia. Puedes eliminarlas.
+                  Estas publicidades ya cumplieron su período de vigencia.
                 </Text>
                 {publicidadesExpiradas.map(renderPublicidadCard)}
               </View>
@@ -932,400 +1063,9 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     )
   }
 
-  const validateEmail = (email) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    return emailRegex.test(email)
-  }
-  const handleSubmitNewComercio = async () => {
-    try {
-	  
-      if (
-        !newComercioData.Nombre ||
-        !newComercioData.NroDocumento ||
-        !newComercioData.Direccion ||
-        !newComercioData.Telefono ||
-        !newComercioData.Correo
-      ) {
-        Alert.alert("Error", "Por favor, complete todos los campos obligatorios.")
-        return
-      }
-      if (!validateEmail(newComercioData.Correo)) {
-        Alert.alert(
-          "Error de validación",
-          "El correo electrónico no tiene un formato válido. Debe ser del formato: ejemplo@dominio.com",
-        )
-        return
-      }
-      const cleanNroDocumento = newComercioData.NroDocumento.replace(/-/g, "")
-      const cuitValidation = validateCUIT(cleanNroDocumento)
-      if (!cuitValidation.valid) {
-        Alert.alert("Error de validación", cuitValidation.message)
-        return
-      }
-
-      if (newComercioHoraIngreso && !validateTimeFormat(newComercioHoraIngreso)) {
-        Alert.Alert("Error", "El horario de apertura debe tener el formato HH:MM (ej: 18:00)")
-        return
-      }
-
-      if (newComercioHoraCierre && !validateTimeFormat(newComercioHoraCierre)) {
-        Alert.alert("Error", "El horario de cierre debe tener el formato HH:MM (ej: 02:00)")
-        return
-      }
-
-      setIsSaving(true)
-
-      const horaIngresoFormatted =
-							
-        newComercioHoraIngreso && newComercioHoraIngreso.trim() !== ""
-          ? formatTimeWithSeconds(newComercioHoraIngreso)
-          : null
-      const horaCierreFormatted =
-        newComercioHoraCierre && newComercioHoraCierre.trim() !== ""
-          ? formatTimeWithSeconds(newComercioHoraCierre)
-          : null
-
-	  
-      const comercioDataToSend = {
-        iD_Comercio: 0,
-        nombre: newComercioData.Nombre,
-        capacidad: Number.parseInt(newComercioData.Capacidad) || 0,
-        mesas: Number.parseInt(newComercioData.Mesas) || 0,
-        generoMusical: newComercioData.GeneroMusical,
-        tipoDocumento: newComercioData.TipoDocumento.replace(/\s+/g, ""),
-        nroDocumento: formatCUIT(newComercioData.NroDocumento),
-        direccion: newComercioData.Direccion,
-        correo: newComercioData.Correo,
-        telefono: newComercioData.Telefono,
-        estado: false, // Comercio pendiente de aprobación
-        fechaCreacion: new Date().toISOString(),
-        horaIngreso: horaIngresoFormatted,
-        horaCierre: horaCierreFormatted,
-        foto: newComercioImageBase64 || "",
-        iD_Usuario: user.iD_Usuario,
-        iD_TipoComercio: newComercioData.ID_TipoComercio,
-      }
-
-    
-
-      const response = await Apis.crearComercio(comercioDataToSend)
-
-      if (response.status === 200 || response.status === 201) {
-        Alert.alert(
-          "Comercio Creado",
-          "Su comercio ha sido registrado exitosamente y está pendiente de aprobación por el administrador.",
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                setCreateModalVisible(false)
-                loadComerciosList()
-              },
-            },
-          ],
-        )
-      } else {
-        throw new Error("Error al crear comercio")
-      }
-    } catch (error) {
-	   
-      let errorMessage = "No se pudo crear el comercio."
-
-      if (error.response?.data) {
-        const errorData = error.response.data
-  
-      
-        
-       
-        if (errorData.correo) {
-          errorMessage = Array.isArray(errorData.correo)
-            ? errorData.correo[0]
-            : errorData.correo
-        }
-        // Error de validación de correo en errors
-        else if (errorData.errors?.correo) {
-           const correoError = Array.isArray(errorData.errors.correo)
-            ? errorData.errors.correo[0]
-            : errorData.errors.correo
-          
-          errorMessage = `${correoError}\n\nDominios aceptados:\n• gmail.com\n• hotmail.com\n• outlook.com\n• yahoo.com\n• live.com\n• *.edu.ar (instituciones educativas)`
-        }
-        else if (typeof errorData === 'string') {
-          // Si el mensaje es sobre CUIT
-          if (errorData.includes('CUIT')) {
-            errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
-          } 
-          // Si no es específico, usar el mensaje del backend
-          else {
-            errorMessage = errorData
-          }
-        }
-        // Error de CUIT duplicado 
-        else if (
-          errorData.message?.includes("CUIT") ||
-          errorData.title?.includes("CUIT")
-        ) {
-          errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
-        }
-        // Otros errores de validación
-        else if (errorData.errors) {
-          const firstError = Object.values(errorData.errors)[0]
-          if (Array.isArray(firstError) && firstError.length > 0) {
-            errorMessage = firstError[0]
-          }
-        }
-        // Mensaje genérico del backend
-        else if (errorData.message) {
-          errorMessage = errorData.message
-        }
-      }
-      // Si el error es un string directo
-      else if (typeof error.message === "string" && error.message.includes("CUIT")) {
-        errorMessage = "Ya existe un comercio registrado con este CUIT. Por favor, verifique el número ingresado."
-      }
-
-      Alert.alert(
-        "Error al registrar comercio",
-        errorMessage,
-        [{ text: "Entendido" }],
-      )
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleDeleteComercio = () => {
-    Alert.alert(
-      "Confirmar eliminación",
-      `¿Está seguro que desea eliminar el comercio "${selectedComercio.nombre}"? Esta acción no se puede deshacer.`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Eliminar",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const response = await Apis.eliminarComercio(selectedComercio.iD_Comercio)
-
-              if (response.status === 200 || response.status === 201 || response.status === 204) {
-                Alert.alert("Comercio eliminado", "Su comercio ha sido eliminado exitosamente.")
-                setModalVisible(false)
-                await loadComerciosList()
-              } else {
-                throw new Error("Error al eliminar comercio")
-              }
-            } catch (error) {
-              Alert.alert("Error", "No se pudo eliminar el comercio.")
-            }
-          },
-        },
-      ],
-    )
-  }
-
-  // Function to load publicidades for the selected comercio
-  const loadPublicidades = async (comercioId) => {
-    try {
-      console.log("Loading publicidades for comercio:", comercioId)
-      const response = await Apis.obtenerPublicidadesListado()
-      if (response.status === 200) {
-        const allPublicidades = response.data
-        const now = new Date()
-
-        const comercioPublicidades = allPublicidades
-          .filter((pub) => pub.iD_Comercio === comercioId)
-          .map((pub) => {
-            // Calculate expiration date based on FechaCreacion + Tiempo
-            const fechaCreacion = new Date(pub.fechaCreacion || pub.FechaCreacion)
-            const dias = getDiasFromTiempo(pub.tiempo)
-            const fechaExpiracion = new Date(fechaCreacion)
-            fechaExpiracion.setDate(fechaExpiracion.getDate() + dias)
-
-            return {
-              ...pub,
-              fechaExpiracionCalculada: fechaExpiracion,
-            }
-          })
-          .filter((pub) => {
-            // Only show if not expired (or if estado is false/pending payment)
-            if (!pub.estado) return true // Show pending payments
-            return pub.fechaExpiracionCalculada > now // Hide expired paid publicidades
-          })
-
-        console.log("Publicidades loaded:", comercioPublicidades.length)
-        setPublicidadesList(comercioPublicidades)
-      }
-    } catch (error) {
-      console.error("Error al cargar publicidades:", error)
-      setPublicidadesList([])
-    }
-  }
-
-  
-  const handleEditPublicidad = (publicidad) => {
-    // Si la publicidad ya fue pagada y está rechazada, permitir editar sin cambiar duración
-    if (publicidad.pago && !publicidad.estado && publicidad.motivoRechazo) {
-      Alert.alert(
-        "Editar Publicidad Rechazada",
-        "Esta publicidad ya fue pagada. Puedes actualizar la imagen para que sea revisada nuevamente por el administrador.",
-        [
-          {
-            text: "Cancelar",
-            style: "cancel",
-          },
-          {
-            text: "Editar Imagen",
-            onPress: () => {
-              setSelectedPublicidad({ ...publicidad, isRejectedPaid: true })
-              setPublicidadModalVisible(true)
-            },
-          },
-        ],
-      )
-    } else {
-      setSelectedPublicidad(publicidad)
-      setPublicidadModalVisible(true)
-    }
-  }
-
-
-  const handleEditRejectedUnpaid = (pub) => {
-     console.log("handleEditRejectedUnpaid llamada con:", {
-      publicidadId: pub.iD_Publicidad,
-      comercioId: pub.iD_Comercio,
-      pago: pub.pago,
-      estado: pub.estado,
-      motivoRechazo: pub.motivoRechazo,
-    })
-
-    // Find the comercio object from the list
-    const comercio = comerciosList.find((c) => c.iD_Comercio === pub.iD_Comercio)
-
-    console.log("Found comercio:", comercio ? { id: comercio.iD_Comercio, nombre: comercio.nombre } : null)
-
-    if (comercio) {
-      setSelectedComercio(comercio)
-    }
-
-    console.log("Setting selectedPublicidad with isRejectedUnpaid: true")
-    setSelectedPublicidad({
-      ...pub,
-      isRejectedUnpaid: true,
-    })
-    setPublicidadModalVisible(true)
-  }
-
-  // Function to handle publicidad delete
-  const handleDeletePublicidad = (publicidad) => {
-    Alert.alert("Eliminar Publicidad", "¿Estás seguro que deseas eliminar esta publicidad?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Eliminar",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await Apis.eliminarPublicidad(publicidad.iD_Publicidad)
-            Alert.alert("Éxito", "La publicidad ha sido eliminada correctamente.")
-            if (selectedComercio) {
-              await loadPublicidades(selectedComercio.iD_Comercio)
-            }
-
-            // Siempre recargar todas las publicidades si estamos en el tab de publicidades
-
-            if (activeTab === "publicidades") {
-              await loadTodasPublicidades()
-            }
-          } catch (error) {
-            console.log("Error al eliminar publicidad:", error)
-            Alert.alert("Error", "No se pudo eliminar la publicidad.")
-          }
-        },
-      },
-    ])
-  }
-
- 
-
-  const handlePayPublicidad = async (publicidad) => {
-    try {
-      const durations = [
-        { days: 7, label: "1 Semana", price: 3000 },
-        { days: 15, label: "15 Días", price: 5000 },
-        { days: 30, label: "1 Mes", price: 10000 },
-      ]
-
-      // Determine duration from tiempo field
-      let duration = durations[0] // default
-      const tiempo = publicidad.tiempo
-      if (tiempo.includes("15")) duration = durations[1]
-      else if (tiempo.includes("30")) duration = durations[2]
-
-      console.log("Generando link de pago para publicidad:", publicidad.iD_Publicidad)
-
-      const preferenciaResponse = await Apis.crearPreferenciaPago({
-        titulo: `Publicidad ${duration.label} - ${publicidad.nombreComercio || "Comercio"}`,
-        precio: duration.price,
-        publicidadId: publicidad.iD_Publicidad,
-      })
-
-      if (preferenciaResponse.data && preferenciaResponse.data.init_point) {
-        const checkoutUrl = preferenciaResponse.data.init_point
-        const supported = await Linking.canOpenURL(checkoutUrl)
-
-        if (supported) {
-          await Linking.openURL(checkoutUrl)
-          Alert.alert("Redirigido a Mercado Pago", "Completa el pago para activar tu publicidad.", [
-            { text: "Entendido" },
-          ])
-        } else {
-          Alert.alert("Error", "No se pudo abrir el link de pago.")
-        }
-      }
-    } catch (error) {
-      console.error("Error al generar link de pago:", error)
-      Alert.alert("Error", "No se pudo generar el link de pago. Intenta nuevamente.")
-    }
-  }
-
-  const getTiempoLabel = (tiempo) => {
-    if (!tiempo) return "Duración desconocida"
-
-    // Remove milliseconds and normalize format
-    const normalizedTiempo = tiempo.split(".")[0] // Remove .000 if present
-
-    // Extract the first number (days) from the tiempo string
-    const parts = normalizedTiempo.split(":")
-    const dias = parts.length > 0 ? Number.parseInt(parts[0]) : 0
-
-    // Map tiempo values to labels based on days
-    if (dias === 7) {
-      return "1 Semana"
-    } else if (dias === 15) {
-      return "15 Días"
-    } else if (dias >= 23 && dias <= 31) {
-      // Handle 1 month (23, 28, 29, 30, or 31 days)
-      return "1 Mes"
-    }
-
-    return tiempo // Fallback to original value
-  }
-
-  const getDiasFromTiempo = (tiempo) => {
-    if (!tiempo) return 0
-
-    // Remove milliseconds and normalize format
-    const normalizedTiempo = tiempo.split(".")[0] // Remove .000 if present
-
-    // Extract the first number (days) from the tiempo string
-    // Format is "DD:HH:MM" or "D:HH:MM"
-    const parts = normalizedTiempo.split(":")
-    if (parts.length > 0) {
-      return Number.parseInt(parts[0]) || 0
-    }
-
-    return 0
-  }
-
+  // =====================================================
+  // RENDER COMERCIO DETAILS - Copiá de tu archivo original
+  // =====================================================
   const renderComercioDetails = () => {
     if (!selectedComercio) return null
 
@@ -1340,15 +1080,13 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     }
     const isRechazado = selectedComercio.motivoRechazo && selectedComercio.motivoRechazo.trim() !== ""
 
-
     return (
       <ScrollView style={styles.modalScrollView}>
         <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}>
-          <AntDesign name="close" size={24} color="black" />
+          <AntDesign name="close" size={24} color="white" />
         </TouchableOpacity>
 
         {!isEditing ? (
-          // Vista de solo lectura
           <>
             <Text numberOfLines={2} style={styles.modalTitle}>
               {selectedComercio.nombre}
@@ -1379,9 +1117,9 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
               </Text>
               {selectedComercio.generoMusical && <Text style={styles.hashtag}>#{selectedComercio.generoMusical}</Text>}
             </View>
+
             {!isRechazado && (
               <View style={styles.advertisingSection}>
-		  
                 <TouchableOpacity
                   style={styles.createPublicidadButton}
                   onPress={() => {
@@ -1394,6 +1132,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
                 </TouchableOpacity>
               </View>
             )}
+
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.editButton} onPress={() => setIsEditing(true)}>
                 <MaterialCommunityIcons name="pencil" size={20} color="white" />
@@ -1406,101 +1145,42 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             </View>
           </>
         ) : (
-          // Vista de edición
           <>
             <Text style={styles.modalTitle}>Editar Comercio</Text>
-
             <View style={styles.editSection}>
               <Text style={styles.editLabel}>Nombre del comercio *</Text>
-              <TextInput
-                style={styles.editInput}
-                value={nombre}
-                onChangeText={setNombre}
-                placeholder="Nombre del comercio"
-              />
+              <TextInput style={styles.editInput} value={nombre} onChangeText={setNombre} placeholder="Nombre" placeholderTextColor="#a0a0a0" />
 
               <Text style={styles.editLabel}>Dirección *</Text>
-              <TextInput
-                style={styles.editInput}
-                value={direccion}
-                onChangeText={setDireccion}
-                placeholder="Dirección"
-              />
+              <TextInput style={styles.editInput} value={direccion} onChangeText={setDireccion} placeholder="Dirección" placeholderTextColor="#a0a0a0" />
 
               <Text style={styles.editLabel}>Capacidad</Text>
-              <TextInput
-                style={styles.editInput}
-                value={capacidad}
-                onChangeText={setCapacidad}
-                placeholder="Capacidad máxima"
-                keyboardType="numeric"
-              />
+              <TextInput style={styles.editInput} value={capacidad} onChangeText={setCapacidad} keyboardType="numeric" placeholderTextColor="#a0a0a0" />
 
-              <Text style={styles.editLabel}>Número de mesas</Text>
-              <TextInput
-                style={styles.editInput}
-                value={mesas}
-                onChangeText={setMesas}
-                placeholder="Cantidad de mesas"
-                keyboardType="numeric"
-              />
+              <Text style={styles.editLabel}>Mesas</Text>
+              <TextInput style={styles.editInput} value={mesas} onChangeText={setMesas} keyboardType="numeric" placeholderTextColor="#a0a0a0" />
 
               <Text style={styles.editLabel}>Género musical</Text>
-              <TextInput
-                style={styles.editInput}
-                value={generoMusical}
-                onChangeText={setGeneroMusical}
-                placeholder="Género musical"
-              />
+              <TextInput style={styles.editInput} value={generoMusical} onChangeText={setGeneroMusical} placeholderTextColor="#a0a0a0" />
 
-              <Text style={styles.editLabel}>Horario de apertura</Text>
-              <TextInput
-                style={styles.editInput}
-                value={openingHours} // Use openingHours state for editing
-                onChangeText={(text) => {
-                
-                  setOpeningHours(text)
-                }}
-                placeholder="ej: 18:00"
-                maxLength={5}
-                placeholderTextColor="#a0a0a0"
-              />
-              <Text style={styles.helperText}>Formato: HH:MM (ej: 18:00 para 6 PM)</Text>
+              <Text style={styles.editLabel}>Horario apertura</Text>
+              <TextInput style={styles.editInput} value={openingHours} onChangeText={setOpeningHours} placeholder="18:00" maxLength={5} placeholderTextColor="#a0a0a0" />
 
-              <Text style={styles.editLabel}>Horario de cierre</Text>
-              <TextInput
-                style={styles.editInput}
-                value={closingHours} // Use closingHours state for editing
-                onChangeText={(text) => {
-                 
-                  setClosingHours(text)
-                }}
-                placeholder="ej: 02:00"
-                maxLength={5}
-                placeholderTextColor="#a0a0a0"
-              />
-              <Text style={styles.helperText}>Formato: HH:MM (ej: 02:00 para 2 AM)</Text>
-              <Text style={styles.editLabel}>Imagen del negocio</Text>
-              <TouchableOpacity
-                style={styles.imageButton}
-                onPress={() => handleImagePicker(setBusinessImage, "businessImage")}
-              >
+              <Text style={styles.editLabel}>Horario cierre</Text>
+              <TextInput style={styles.editInput} value={closingHours} onChangeText={setClosingHours} placeholder="02:00" maxLength={5} placeholderTextColor="#a0a0a0" />
+
+              <Text style={styles.editLabel}>Imagen</Text>
+              <TouchableOpacity style={styles.imageButton} onPress={() => handleImagePicker(setBusinessImage, "businessImage")}>
                 <Text style={styles.imageButtonText}>Seleccionar imagen</Text>
               </TouchableOpacity>
               {businessImage && <Image source={{ uri: businessImage }} style={styles.previewImage} />}
             </View>
 
             <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.saveButton, isSaving && styles.disabledButton]}
-                onPress={handleSave}
-                disabled={isSaving}
-              >
-                <MaterialCommunityIcons name="content-save" size={20} color="white" />
+              <TouchableOpacity style={[styles.saveButton, isSaving && styles.disabledButton]} onPress={handleSave} disabled={isSaving}>
                 <Text style={styles.buttonText}>{isSaving ? "Guardando..." : "Guardar"}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.cancelButton} onPress={handleCancelEdit}>
-                <MaterialCommunityIcons name="close" size={20} color="white" />
                 <Text style={styles.buttonText}>Cancelar</Text>
               </TouchableOpacity>
             </View>
@@ -1510,6 +1190,9 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     )
   }
 
+  // =====================================================
+  // RENDER CREATE COMERCIO FORM - Con Picker incluido
+  // =====================================================
   const renderCreateComercioForm = () => {
     return (
       <ScrollView style={styles.modalScrollView}>
@@ -1532,11 +1215,11 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             <Picker.Item label="Boliche" value={2} />
           </Picker>
 
-          <Text style={styles.editLabel}>Nombre del comercio *</Text>
+          <Text style={styles.editLabel}>Nombre *</Text>
           <TextInput
             style={styles.editInput}
             value={newComercioData.Nombre}
-            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Nombre: text }))}
+            onChangeText={(text) => setNewComercioData((prev) => ({ ...prev, Nombre: text }))}
             placeholder="Nombre del comercio"
             placeholderTextColor="#a0a0a0"
           />
@@ -1545,16 +1228,16 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           <TextInput
             style={styles.editInput}
             value={newComercioData.Direccion}
-            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Direccion: text }))}
+            onChangeText={(text) => setNewComercioData((prev) => ({ ...prev, Direccion: text }))}
             placeholder="Dirección"
             placeholderTextColor="#a0a0a0"
           />
 
-          <Text style={styles.editLabel}>Correo del comercio *</Text>
+          <Text style={styles.editLabel}>Correo *</Text>
           <TextInput
             style={styles.editInput}
             value={newComercioData.Correo}
-            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Correo: text }))}
+            onChangeText={(text) => setNewComercioData((prev) => ({ ...prev, Correo: text }))}
             placeholder="correo@ejemplo.com"
             keyboardType="email-address"
             autoCapitalize="none"
@@ -1567,49 +1250,43 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
             value={newComercioData.NroDocumento}
             onChangeText={(text) => {
               const formatted = formatCUIT(text)
-              setNewComercioData((prevState) => ({ ...prevState, NroDocumento: formatted }))
+              setNewComercioData((prev) => ({ ...prev, NroDocumento: formatted }))
             }}
             placeholder="20-12345678-9"
             keyboardType="numeric"
             maxLength={13}
             placeholderTextColor="#a0a0a0"
           />
-          <Text style={styles.helperText}>Formato: 20-12345678-9 (11 dígitos con guiones)</Text>
+          <Text style={styles.helperText}>Formato: 20-12345678-9</Text>
 
-          <Text style={styles.editLabel}>Teléfono del comercio *</Text>
-          <View style={styles.phoneContainer}>
-		  
-            <TextInput
-              style={styles.phoneInput}
-              value={newComercioData.Telefono}
-              onChangeText={(text) => {
-                const cleaned = text.replace(/[^0-9]/g, "").slice(0, 10)
-                setNewComercioData((prevState) => ({ ...prevState, Telefono: cleaned }))
-              }}
-              placeholder="1132419131"
-              keyboardType="phone-pad"
-              maxLength={10}
-              placeholderTextColor="#a0a0a0"
-            />
-          </View>
-          <Text style={styles.helperText}>Ingrese 10 dígitos sin espacios ni guiones</Text>
+          <Text style={styles.editLabel}>Teléfono *</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newComercioData.Telefono}
+            onChangeText={(text) => {
+              const cleaned = text.replace(/[^0-9]/g, "").slice(0, 10)
+              setNewComercioData((prev) => ({ ...prev, Telefono: cleaned }))
+            }}
+            placeholder="1132419131"
+            keyboardType="phone-pad"
+            maxLength={10}
+            placeholderTextColor="#a0a0a0"
+          />
 
           <Text style={styles.editLabel}>Capacidad</Text>
           <TextInput
             style={styles.editInput}
             value={newComercioData.Capacidad}
-            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Capacidad: text }))}
-            placeholder="Capacidad máxima"
+            onChangeText={(text) => setNewComercioData((prev) => ({ ...prev, Capacidad: text }))}
             keyboardType="numeric"
             placeholderTextColor="#a0a0a0"
           />
 
-          <Text style={styles.editLabel}>Número de mesas</Text>
+          <Text style={styles.editLabel}>Mesas</Text>
           <TextInput
             style={styles.editInput}
             value={newComercioData.Mesas}
-            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, Mesas: text }))}
-            placeholder="Cantidad de mesas"
+            onChangeText={(text) => setNewComercioData((prev) => ({ ...prev, Mesas: text }))}
             keyboardType="numeric"
             placeholderTextColor="#a0a0a0"
           />
@@ -1618,59 +1295,28 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           <TextInput
             style={styles.editInput}
             value={newComercioData.GeneroMusical}
-            onChangeText={(text) => setNewComercioData((prevState) => ({ ...prevState, GeneroMusical: text }))}
-            placeholder="Género musical"
+            onChangeText={(text) => setNewComercioData((prev) => ({ ...prev, GeneroMusical: text }))}
             placeholderTextColor="#a0a0a0"
           />
-          <Text style={styles.editLabel}>Horario de apertura</Text>
-          <TextInput
-            style={styles.editInput}
-            value={newComercioHoraIngreso}
-            onChangeText={(text) => {
-             
-              setNewComercioHoraIngreso(text)
-            }}
-            placeholder="ej: 18:00"
-            maxLength={5}
-            placeholderTextColor="#a0a0a0"
-          />
-          <Text style={styles.helperText}>Formato: HH:MM (ej: 18:00 para 6 PM)</Text>
 
-          <Text style={styles.editLabel}>Horario de cierre</Text>
-          <TextInput
-            style={styles.editInput}
-            value={newComercioHoraCierre}
-            onChangeText={(text) => {
-            
-              setNewComercioHoraCierre(text)
-            }}
-            placeholder="ej: 02:00"
-            maxLength={5}
-            placeholderTextColor="#a0a0a0"
-          />
-          <Text style={styles.helperText}>Formato: HH:MM (ej: 02:00 para 2 AM)</Text>
+          <Text style={styles.editLabel}>Horario apertura</Text>
+          <TextInput style={styles.editInput} value={newComercioHoraIngreso} onChangeText={setNewComercioHoraIngreso} placeholder="18:00" maxLength={5} placeholderTextColor="#a0a0a0" />
 
-          <Text style={styles.editLabel}>Imagen del negocio</Text>
-          <TouchableOpacity
-            style={styles.imageButton}
-            onPress={() => handleImagePicker(setNewComercioImage, "newComercioImage")}
-          >
+          <Text style={styles.editLabel}>Horario cierre</Text>
+          <TextInput style={styles.editInput} value={newComercioHoraCierre} onChangeText={setNewComercioHoraCierre} placeholder="02:00" maxLength={5} placeholderTextColor="#a0a0a0" />
+
+          <Text style={styles.editLabel}>Imagen</Text>
+          <TouchableOpacity style={styles.imageButton} onPress={() => handleImagePicker(setNewComercioImage, "newComercioImage")}>
             <Text style={styles.imageButtonText}>Seleccionar imagen</Text>
           </TouchableOpacity>
           {newComercioImage && <Image source={{ uri: newComercioImage }} style={styles.previewImage} />}
         </View>
 
         <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[styles.saveButton, isSaving && styles.disabledButton]}
-            onPress={handleSubmitNewComercio}
-            disabled={isSaving}
-          >
-            <MaterialCommunityIcons name="content-save" size={20} color="white" />
+          <TouchableOpacity style={[styles.saveButton, isSaving && styles.disabledButton]} onPress={handleSubmitNewComercio} disabled={isSaving}>
             <Text style={styles.buttonText}>{isSaving ? "Creando..." : "Crear Comercio"}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.cancelButton} onPress={() => setCreateModalVisible(false)}>
-            <MaterialCommunityIcons name="close" size={20} color="white" />
             <Text style={styles.buttonText}>Cancelar</Text>
           </TouchableOpacity>
         </View>
@@ -1678,7 +1324,9 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     )
   }
 
-  // Verificaciones de acceso
+  // =====================================================
+  // VERIFICACIONES DE ACCESO
+  // =====================================================
   if (!isAuthenticated) {
     return (
       <View style={styles.errorContainer}>
@@ -1712,6 +1360,10 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
   const rejectedComercios = comerciosList.filter(
     (comercio) => comercio.estado === false && comercio.motivoRechazo && comercio.motivoRechazo.trim() !== "",
   )
+
+  // =====================================================
+  // RENDER PRINCIPAL
+  // =====================================================
   return (
     <View style={styles.container}>
       <View style={styles.headerContainer}>
@@ -1731,17 +1383,11 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           <Text style={[styles.tabText, activeTab === "comercios" && styles.activeTabText]}>Comercios</Text>
         </TouchableOpacity>
 
-		
-
         <TouchableOpacity
           style={[styles.tab, activeTab === "publicidades" && styles.activeTab]}
           onPress={() => setActiveTab("publicidades")}
         >
-          <MaterialCommunityIcons
-            name="billboard"
-            size={20}
-            color={activeTab === "publicidades" ? "#D838F5" : "#666"}
-          />
+          <MaterialCommunityIcons name="billboard" size={20} color={activeTab === "publicidades" ? "#D838F5" : "#666"} />
           <Text style={[styles.tabText, activeTab === "publicidades" && styles.activeTabText]}>Publicidades</Text>
         </TouchableOpacity>
       </View>
@@ -1768,6 +1414,7 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
               />
             </View>
           )}
+
           {pendingComercios.length > 0 && (
             <View style={styles.pendingSection}>
               <Text style={styles.sectionTitle}>⏳ Pendientes de Aprobación ({pendingComercios.length})</Text>
@@ -1807,30 +1454,22 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
         </>
       )}
 
-	  
-
       {activeTab === "publicidades" && renderPublicidadesPanel()}
+
       {/* Modal de detalles del comercio */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
+      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.centeredView}>
           <View style={styles.modalView}>{renderComercioDetails()}</View>
         </View>
       </Modal>
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={createModalVisible}
-        onRequestClose={() => setCreateModalVisible(false)}
-      >
+
+      {/* Modal de crear comercio */}
+      <Modal animationType="slide" transparent={true} visible={createModalVisible} onRequestClose={() => setCreateModalVisible(false)}>
         <View style={styles.centeredView}>
           <View style={styles.modalView}>{renderCreateComercioForm()}</View>
         </View>
       </Modal>
+
       {/* Publicidad Modal */}
       <PublicidadModal
         visible={publicidadModalVisible}
@@ -1838,9 +1477,8 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
           setPublicidadModalVisible(false)
           setSelectedPublicidad(null)
           if (selectedComercio) {
-            loadPublicidades(selectedComercio.iD_Comercio) // Reload after closing
+            loadPublicidades(selectedComercio.iD_Comercio)
           }
-
           if (activeTab === "publicidades") {
             loadTodasPublicidades()
           }
@@ -1853,6 +1491,8 @@ const [newComercioHoraIngreso, setNewComercioHoraIngreso] = useState("")
     </View>
   )
 }
+
+
 
 const styles = StyleSheet.create({
 
