@@ -14,6 +14,7 @@ import {
 import { AntDesign, MaterialCommunityIcons } from "@expo/vector-icons"
 import * as ImagePicker from "expo-image-picker"
 import * as FileSystem from "expo-file-system"
+import AsyncStorage from "@react-native-async-storage/async-storage"  // ← NUEVO
 import Apis from "../../Apis/Apis"
 
 export default function PublicidadModal({
@@ -109,10 +110,24 @@ export default function PublicidadModal({
     }
   }
 
-  const openMercadoPagoCheckout = async (checkoutUrl, publicidadId) => {
+  
+  const openMercadoPagoCheckout = async (checkoutUrl, publicidadId, preferenceId) => {
     console.log("[PublicidadModal] Abriendo checkout de MercadoPago:", checkoutUrl)
 
     try {
+     
+      try {
+        await AsyncStorage.setItem("pendingPayment", JSON.stringify({
+          publicidadId: publicidadId,
+          preferenceId: preferenceId,
+          timestamp: Date.now()
+        }))
+        console.log("[PublicidadModal] Pago pendiente guardado en AsyncStorage:", publicidadId)
+      } catch (storageError) {
+        console.error("[PublicidadModal] Error guardando pago pendiente:", storageError)
+      }
+     
+
       const supported = await Linking.canOpenURL(checkoutUrl)
 
       if (supported) {
@@ -136,10 +151,14 @@ export default function PublicidadModal({
         )
       } else {
         Alert.alert("Error", "No se pudo abrir el link de pago de Mercado Pago.")
+        // Limpiar pago pendiente si no se pudo abrir
+        await AsyncStorage.removeItem("pendingPayment")
       }
     } catch (error) {
       console.error("[PublicidadModal] Error abriendo checkout:", error)
       Alert.alert("Error", "No se pudo abrir Mercado Pago. Intenta nuevamente.")
+      // Limpiar pago pendiente en caso de error
+      await AsyncStorage.removeItem("pendingPayment")
     }
   }
 
@@ -190,9 +209,11 @@ export default function PublicidadModal({
 
           if (preferenciaResponse.data?.init_point) {
             setIsLoading(false)
+            // MODIFICADO: Ahora pasamos preferenceId
             await openMercadoPagoCheckout(
               preferenciaResponse.data.init_point,
-              publicidadToEdit.iD_Publicidad
+              publicidadToEdit.iD_Publicidad,
+              preferenciaResponse.data.id  // ← NUEVO: pasar preferenceId
             )
           } else {
             throw new Error("No se pudo generar el link de pago")
@@ -238,9 +259,11 @@ export default function PublicidadModal({
 
         if (preferenciaResponse.data?.init_point) {
           setIsLoading(false)
+          // MODIFICADO: Ahora pasamos preferenceId
           await openMercadoPagoCheckout(
             preferenciaResponse.data.init_point,
-            publicidadToEdit.iD_Publicidad
+            publicidadToEdit.iD_Publicidad,
+            preferenciaResponse.data.id  // ← NUEVO: pasar preferenceId
           )
         } else {
           throw new Error("No se pudo crear la preferencia de pago")
@@ -283,7 +306,12 @@ export default function PublicidadModal({
 
         if (preferenciaResponse.data?.init_point) {
           setIsLoading(false)
-          await openMercadoPagoCheckout(preferenciaResponse.data.init_point, publicidadId)
+          // MODIFICADO: Ahora pasamos preferenceId
+          await openMercadoPagoCheckout(
+            preferenciaResponse.data.init_point, 
+            publicidadId,
+            preferenciaResponse.data.id  // ← NUEVO: pasar preferenceId
+          )
         } else {
           throw new Error("No se pudo crear la preferencia de pago")
         }

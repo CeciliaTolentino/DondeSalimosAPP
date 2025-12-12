@@ -19,13 +19,17 @@ export const AuthProvider = ({ children }) => {
     isRegistered: false,
     googleIdToken: null,
     googleUserData: null,
-    // Nuevo: para manejar navegación después de pago
     pendingPaymentNavigation: null,
   })
 
   const isRestoringSession = useRef(false)
+  const hasProcessedInitialUrl = useRef(false)
 
-  // Guardar datos del usuario en AsyncStorage para restaurar sesión
+  // =====================================================
+  // FUNCIONES DE PERSISTENCIA DE DATOS
+  // =====================================================
+
+  // Guardar datos del usuario en AsyncStorage
   const persistUserData = async (userData) => {
     try {
       if (userData) {
@@ -56,26 +60,157 @@ export const AuthProvider = ({ children }) => {
   // Limpiar datos persistidos
   const clearPersistedData = async () => {
     try {
-      await AsyncStorage.multiRemove(["userData", "jwtToken"])
+      await AsyncStorage.multiRemove(["userData", "jwtToken", "pendingPayment"])
       console.log("[AuthContext] Datos persistidos limpiados")
     } catch (error) {
       console.error("[AuthContext] Error limpiando datos persistidos:", error)
     }
   }
 
+  // =====================================================
+  // FUNCIONES DE PAGO PENDIENTE (AsyncStorage fallback)
+  // =====================================================
+
+  // Guardar pago pendiente antes de ir a Mercado Pago
+  const savePendingPayment = async (publicidadId, preferenceId) => {
+    try {
+      await AsyncStorage.setItem("pendingPayment", JSON.stringify({
+        publicidadId,
+        preferenceId,
+        timestamp: Date.now()
+      }))
+      console.log("[AuthContext] Pago pendiente guardado:", publicidadId)
+    } catch (error) {
+      console.error("[AuthContext] Error guardando pago pendiente:", error)
+    }
+  }
+
+  // Recuperar pago pendiente
+  const getPendingPayment = async () => {
+    try {
+      const data = await AsyncStorage.getItem("pendingPayment")
+      if (data) {
+        const parsed = JSON.parse(data)
+        // Solo usar si es reciente (menos de 10 minutos)
+        if (Date.now() - parsed.timestamp < 10 * 60 * 1000) {
+          console.log("[AuthContext] Pago pendiente recuperado:", parsed)
+          return parsed
+        } else {
+          // Limpiar si es muy viejo
+          await AsyncStorage.removeItem("pendingPayment")
+          console.log("[AuthContext] Pago pendiente expirado, eliminado")
+        }
+      }
+      return null
+    } catch (error) {
+      console.error("[AuthContext] Error recuperando pago pendiente:", error)
+      return null
+    }
+  }
+
+  // Limpiar pago pendiente
+  const clearPendingPayment = async () => {
+    try {
+      await AsyncStorage.removeItem("pendingPayment")
+      console.log("[AuthContext] Pago pendiente limpiado")
+    } catch (error) {
+      console.error("[AuthContext] Error limpiando pago pendiente:", error)
+    }
+  }
+
+  // =====================================================
+  // FUNCIÓN PARA PROCESAR DEEP LINKS DE PAGO
+  // =====================================================
+
+  const handlePaymentDeepLink = useCallback((url) => {
+    if (!url) return false
+
+    console.log("[AuthContext] Deep link recibido:", url)
+
+    // Verificar si es un deep link de pago
+    if (url.includes("payment/success") || url.includes("payment/failure") || 
+        url.includes("payment/pending") || url.includes("payment_id")) {
+      
+      console.log("[AuthContext] Es un deep link de pago")
+
+      let status = "unknown"
+      let paymentId = null
+      let preferenceId = null
+      let publicidadId = null
+
+      // Determinar el status
+      if (url.includes("payment/success") || url.includes("status=approved")) {
+        status = "success"
+      } else if (url.includes("payment/failure") || url.includes("status=rejected")) {
+        status = "failure"
+      } else if (url.includes("payment/pending") || url.includes("status=pending")) {
+        status = "pending"
+      }
+
+      // Extraer parámetros
+      const paymentIdMatch = url.match(/payment_id=([^&]+)/)
+      const preferenceIdMatch = url.match(/preference_id=([^&]+)/)
+      const publicidadIdMatch = url.match(/publicidad_id=([^&]+)/)
+      const externalRefMatch = url.match(/external_reference=([^&]+)/)
+
+      paymentId = paymentIdMatch?.[1]
+      preferenceId = preferenceIdMatch?.[1]
+      publicidadId = publicidadIdMatch?.[1] || externalRefMatch?.[1]
+
+      console.log("[AuthContext] Datos del pago:", { status, paymentId, preferenceId, publicidadId })
+
+      // Guardar la navegación pendiente
+      setAuthState((prev) => ({
+        ...prev,
+        pendingPaymentNavigation: {
+          status,
+          paymentId,
+          preferenceId,
+          publicidadId,
+          timestamp: Date.now(),
+        },
+      }))
+
+      // Limpiar el pago pendiente de AsyncStorage ya que el deep link funcionó
+      clearPendingPayment()
+
+      return true
+    }
+
+    return false
+  }, [])
+
+  // =====================================================
+  // useEffect PRINCIPAL - Inicialización de la app
+  // =====================================================
+
   useEffect(() => {
-    const checkInitialAuth = async () => {
+    const initializeApp = async () => {
       try {
-        console.log("[AuthContext] Verificando autenticación inicial...")
+        console.log("[AuthContext] Inicializando app...")
         isRestoringSession.current = true
 
+        // PASO 1: Obtener la URL inicial ANTES de cualquier otra cosa
+        let initialUrl = null
+        try {
+          initialUrl = await Linking.getInitialURL()
+          if (initialUrl) {
+            console.log("[AuthContext] URL inicial detectada:", initialUrl)
+          } else {
+            console.log("[AuthContext] No hay URL inicial")
+          }
+        } catch (error) {
+          console.error("[AuthContext] Error obteniendo URL inicial:", error)
+        }
+
+        // PASO 2: Restaurar sesión
+        console.log("[AuthContext] Verificando autenticación inicial...")
         const token = await getJwtToken()
         const userData = await restoreUserData()
 
         if (token && userData) {
           console.log("[AuthContext] Sesión encontrada, restaurando...")
           
-          // Restaurar el estado de autenticación
           let isAdmin = false
           let isBarOwner = false
 
@@ -101,100 +236,69 @@ export const AuthProvider = ({ children }) => {
           }))
 
           console.log("[AuthContext] Sesión restaurada exitosamente")
+
+          // PASO 3: Procesar deep link si existe
+          let paymentProcessed = false
+
+          if (initialUrl && !hasProcessedInitialUrl.current) {
+            hasProcessedInitialUrl.current = true
+            console.log("[AuthContext] Procesando URL inicial...")
+            // Pequeño delay para asegurar que el estado se actualizó
+            setTimeout(() => {
+              paymentProcessed = handlePaymentDeepLink(initialUrl)
+            }, 300)
+          }
+
+          // PASO 4: Si no hubo deep link, verificar si hay un pago pendiente en AsyncStorage
+          // Usamos un timeout mayor para dar tiempo al deep link
+          setTimeout(async () => {
+            if (!hasProcessedInitialUrl.current || !initialUrl) {
+              const pendingPayment = await getPendingPayment()
+              if (pendingPayment) {
+                console.log("[AuthContext] Verificando pago pendiente desde AsyncStorage...")
+                setAuthState((prev) => ({
+                  ...prev,
+                  pendingPaymentNavigation: {
+                    status: "pending_verification",
+                    publicidadId: pendingPayment.publicidadId,
+                    preferenceId: pendingPayment.preferenceId,
+                    timestamp: Date.now(),
+                  },
+                }))
+              }
+            }
+          }, 1000)
+
         } else {
           console.log("[AuthContext] No hay sesión guardada")
           setAuthState((prev) => ({ ...prev, isLoading: false }))
         }
+
       } catch (error) {
-        console.error("[AuthContext] Error verificando autenticación inicial:", error)
+        console.error("[AuthContext] Error en inicialización:", error)
         setAuthState((prev) => ({ ...prev, isLoading: false }))
       } finally {
         isRestoringSession.current = false
       }
     }
 
-    checkInitialAuth()
-  }, [])
-
-  // Manejar deep links de pago a nivel global
-  useEffect(() => {
-    const handlePaymentDeepLink = async (url) => {
-      if (!url) return
-
-      console.log("[AuthContext] Deep link recibido:", url)
-
-      // Verificar si es un deep link de pago
-      if (url.includes("dondesalimos://payment/") || url.includes("payment_id")) {
-        console.log("[AuthContext] Es un deep link de pago")
-
-        // Extraer información del pago
-        let status = "unknown"
-        let paymentId = null
-        let preferenceId = null
-        let publicidadId = null
-
-        // Parsear según el formato de la URL
-        if (url.includes("payment/success")) {
-          status = "success"
-        } else if (url.includes("payment/failure")) {
-          status = "failure"
-        } else if (url.includes("payment/pending")) {
-          status = "pending"
-        }
-
-        // Extraer parámetros
-        const paymentIdMatch = url.match(/payment_id=([^&]+)/)
-        const preferenceIdMatch = url.match(/preference_id=([^&]+)/)
-        const publicidadIdMatch = url.match(/publicidad_id=([^&]+)/)
-        const externalRefMatch = url.match(/external_reference=([^&]+)/)
-
-        paymentId = paymentIdMatch?.[1]
-        preferenceId = preferenceIdMatch?.[1]
-        publicidadId = publicidadIdMatch?.[1] || externalRefMatch?.[1]
-
-        console.log("[AuthContext] Datos del pago:", { status, paymentId, preferenceId, publicidadId })
-
-        // Guardar la navegación pendiente para que BarManagement la maneje
-        setAuthState((prev) => ({
-          ...prev,
-          pendingPaymentNavigation: {
-            status,
-            paymentId,
-            preferenceId,
-            publicidadId,
-            timestamp: Date.now(),
-          },
-        }))
-      }
-    }
-
-    // Verificar si la app se abrió con un deep link
-    const checkInitialURL = async () => {
-      try {
-        const initialUrl = await Linking.getInitialURL()
-        if (initialUrl) {
-          console.log("[AuthContext] URL inicial:", initialUrl)
-          // Pequeño delay para asegurar que la sesión se restaure primero
-          setTimeout(() => handlePaymentDeepLink(initialUrl), 1000)
-        }
-      } catch (error) {
-        console.error("[AuthContext] Error obteniendo URL inicial:", error)
-      }
-    }
-
-    checkInitialURL()
+    initializeApp()
 
     // Escuchar deep links mientras la app está abierta
     const subscription = Linking.addEventListener("url", (event) => {
+      console.log("[AuthContext] Deep link recibido (app abierta):", event.url)
       handlePaymentDeepLink(event.url)
     })
 
     return () => {
       subscription?.remove()
     }
-  }, [])
+  }, [handlePaymentDeepLink])
 
-  // Función para limpiar la navegación pendiente de pago
+  // =====================================================
+  // FUNCIONES DE AUTENTICACIÓN
+  // =====================================================
+
   const clearPendingPaymentNavigation = useCallback(() => {
     setAuthState((prev) => ({
       ...prev,
@@ -219,7 +323,6 @@ export const AuthProvider = ({ children }) => {
       }
     }
 
-    // Persistir datos del usuario
     await persistUserData(userData)
 
     setAuthState((prevState) => ({
@@ -585,6 +688,8 @@ export const AuthProvider = ({ children }) => {
         actualizarUsuario,
         eliminarUsuario,
         clearPendingPaymentNavigation,
+        savePendingPayment, 
+        clearPendingPayment, 
       }}
     >
       {children}

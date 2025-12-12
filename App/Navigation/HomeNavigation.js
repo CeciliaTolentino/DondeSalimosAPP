@@ -21,7 +21,7 @@ export default function HomeNavigation() {
           options={{ headerShown: false }}
         />
     <Stack.Screen 
-          name="BarManagement" 
+          name="Comercio" 
           component={BarManagement}
           options={{ headerShown: false }}
         />

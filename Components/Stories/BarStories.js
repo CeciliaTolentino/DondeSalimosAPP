@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react"
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Animated } from "react-native"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { LinearGradient } from "expo-linear-gradient"
 import Apis from "../../Apis/Apis"
 import PublicidadViewerModal from "../advertising/publicidadViewerModal"
 
-
 const VIEWED_STORIES_KEY = "@viewed_publicidades"
+const PUBLICIDADES_CACHE_KEY = "@publicidades_cache"
+const CACHE_DURATION = 2 * 60 * 1000 // 2 minutos de caché (reducido para mejor actualización)
 
 export default function BarStories({ onStoryPress }) {
   const [publicidades, setPublicidades] = useState([])
@@ -16,36 +17,43 @@ export default function BarStories({ onStoryPress }) {
   const [viewedStories, setViewedStories] = useState(new Set())
 
   const shimmerAnims = useRef({})
+  const isMountedRef = useRef(true)
+  const isLoadingRef = useRef(false)
 
+  // Cleanup en unmount
   useEffect(() => {
-    clearViewedStories()
+    isMountedRef.current = true
+    loadViewedStories()
     loadPublicidades()
+
+    return () => {
+      isMountedRef.current = false
+    }
   }, [])
 
-  const clearViewedStories = async () => {
+  const loadViewedStories = async () => {
     try {
-      await AsyncStorage.removeItem(VIEWED_STORIES_KEY)
-      console.log(" Cleared all viewed stories from AsyncStorage")
-      setViewedStories(new Set())
+      const viewed = await AsyncStorage.getItem(VIEWED_STORIES_KEY)
+      if (viewed && isMountedRef.current) {
+        setViewedStories(new Set(JSON.parse(viewed)))
+      }
     } catch (error) {
-      console.error(" Error clearing viewed stories:", error)
+      console.error("Error loading viewed stories:", error)
     }
   }
 
   const markAsViewed = async (publicidadId) => {
     try {
-      console.log("Marking as viewed:", publicidadId)
       const newViewed = new Set(viewedStories)
       newViewed.add(publicidadId)
       setViewedStories(newViewed)
       await AsyncStorage.setItem(VIEWED_STORIES_KEY, JSON.stringify(Array.from(newViewed)))
-      console.log("Viewed stories updated:", Array.from(newViewed))
     } catch (error) {
       console.error("Error saving viewed story:", error)
     }
   }
 
-  const getShimmerAnim = (publicidadId) => {
+  const getShimmerAnim = useCallback((publicidadId) => {
     if (!shimmerAnims.current[publicidadId]) {
       shimmerAnims.current[publicidadId] = new Animated.Value(0)
       Animated.loop(
@@ -53,52 +61,108 @@ export default function BarStories({ onStoryPress }) {
           toValue: 1,
           duration: 2500,
           useNativeDriver: true,
-        }),
+        })
       ).start()
     }
     return shimmerAnims.current[publicidadId]
-  }
+  }, [])
+
+  const filterActivePublicidades = useCallback((data) => {
+    const hoy = new Date()
+
+    return data.filter((pub) => {
+      try {
+        if (!pub.estado || !pub.pago) return false
+
+        const imagenBase64 = pub.imagen || pub.Imagen || pub.foto || pub.Foto
+        if (!imagenBase64 || imagenBase64.length === 0) return false
+
+        const dias = Number.parseInt(pub.tiempo.split(":")[0])
+        const fechaCreacion = new Date(pub.fechaCreacion)
+        const fechaExpiracion = new Date(fechaCreacion.getTime() + dias * 24 * 60 * 60 * 1000)
+
+        return fechaExpiracion > hoy
+      } catch (error) {
+        return false
+      }
+    })
+  }, [])
 
   const loadPublicidades = async () => {
+    if (isLoadingRef.current) return
+    isLoadingRef.current = true
+
     try {
-      const response = await Apis.obtenerPublicidadesListado()
+      // Intentar cargar desde caché primero para mostrar algo rápido
+      const cached = await AsyncStorage.getItem(PUBLICIDADES_CACHE_KEY)
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached)
+        const isValid = Date.now() - timestamp < CACHE_DURATION
 
-      if (response.status === 200) {
-        const activas = response.data.filter((pub) => {
-          try {
-            if (!pub.estado || !pub.pago) return false
-           
-            const imagenBase64 = pub.imagen || pub.Imagen || pub.foto || pub.Foto
-            if (!imagenBase64 || imagenBase64.length === 0) return false
-
-            const dias = Number.parseInt(pub.tiempo.split(":")[0])
-            const fechaCreacion = new Date(pub.fechaCreacion)
-            const fechaExpiracion = new Date(fechaCreacion.getTime() + dias * 24 * 60 * 60 * 1000)
-            const hoy = new Date()
-
-           return fechaExpiracion > hoy
-          
-          } catch (error) {
-            console.error("Error al procesar publicidad:", pub.iD_Publicidad, error)
-            return false
-          }
-        })
-
-        setPublicidades(activas)
+        if (isValid && data.length > 0 && isMountedRef.current) {
+          console.log("[BarStories] Usando caché:", data.length, "publicidades")
+          setPublicidades(data)
+          setIsLoading(false)
+        }
       }
+
+      // SIEMPRE buscar datos frescos del servidor
+      await fetchPublicidadesFromServer()
     } catch (error) {
       console.error("Error al cargar publicidades:", error)
-      setPublicidades([])
+      if (isMountedRef.current) {
+        setPublicidades([])
+      }
     } finally {
-      setIsLoading(false)
+      if (isMountedRef.current) {
+        setIsLoading(false)
+      }
+      isLoadingRef.current = false
     }
   }
 
-  const handleStoryPress = useCallback((publicidad) => {
-    markAsViewed(publicidad.iD_Publicidad)
-    setSelectedPublicidad(publicidad)
-    setViewerVisible(true)
-  }, [])
+  const fetchPublicidadesFromServer = async () => {
+    try {
+      const response = await Apis.obtenerPublicidadesListado()
+
+      if (response.status === 200 && isMountedRef.current) {
+        const activas = filterActivePublicidades(response.data)
+
+        // Guardar en caché
+        await AsyncStorage.setItem(
+          PUBLICIDADES_CACHE_KEY,
+          JSON.stringify({ data: activas, timestamp: Date.now() })
+        )
+
+        // Comparar por IDs para ver si hay cambios reales
+        const currentIds = new Set(publicidades.map((p) => p.iD_Publicidad))
+        const newIds = activas.map((p) => p.iD_Publicidad)
+
+        const hasNewItems = newIds.some((id) => !currentIds.has(id))
+        const hasRemovedItems = publicidades.some((p) => !newIds.includes(p.iD_Publicidad))
+        const hasChanges = hasNewItems || hasRemovedItems || activas.length !== publicidades.length
+
+        if (hasChanges) {
+          console.log("[BarStories] Cambios detectados, actualizando UI")
+          console.log("[BarStories] Publicidades activas:", activas.length)
+          setPublicidades(activas)
+        } else {
+          console.log("[BarStories] Sin cambios, manteniendo estado actual")
+        }
+      }
+    } catch (error) {
+      console.error("[BarStories] Error fetching from server:", error)
+    }
+  }
+
+  const handleStoryPress = useCallback(
+    (publicidad) => {
+      markAsViewed(publicidad.iD_Publicidad)
+      setSelectedPublicidad(publicidad)
+      setViewerVisible(true)
+    },
+    [viewedStories]
+  )
 
   const handleViewOnMap = useCallback(
     (publicidad) => {
@@ -107,74 +171,38 @@ export default function BarStories({ onStoryPress }) {
         onStoryPress(publicidad.iD_Comercio)
       }
     },
-    [onStoryPress],
+    [onStoryPress]
   )
 
   const convertBase64ToImage = useCallback((base64String) => {
-    if (!base64String || base64String.length === 0) {
-      console.error("Invalid base64 string")
-      return null
-    }
+    if (!base64String || base64String.length === 0) return null
+    if (base64String.startsWith("data:image")) return base64String
     return "data:image/jpeg;base64," + base64String
   }, [])
 
+  // Memoizar los items para evitar re-renders innecesarios
   const storyItems = useMemo(() => {
-    return publicidades.map((publicidad, index) => {
-      const imagenBase64 = publicidad.imagen || publicidad.Imagen || publicidad.foto || publicidad.Foto
-      const imageUri = convertBase64ToImage(imagenBase64)
-      const isViewed = viewedStories.has(publicidad.iD_Publicidad)
+    return publicidades
+      .map((publicidad, index) => {
+        const imagenBase64 = publicidad.imagen || publicidad.Imagen || publicidad.foto || publicidad.Foto
+        const imageUri = convertBase64ToImage(imagenBase64)
+        const isViewed = viewedStories.has(publicidad.iD_Publicidad)
 
-      if (!imageUri) {
-        return null
-      }
+        if (!imageUri) return null
 
-      const shimmerAnim = getShimmerAnim(publicidad.iD_Publicidad)
-      const rotate = shimmerAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ["0deg", "360deg"],
+        return (
+          <StoryItem
+            key={publicidad.iD_Publicidad || index}
+            publicidad={publicidad}
+            imageUri={imageUri}
+            isViewed={isViewed}
+            onPress={handleStoryPress}
+            getShimmerAnim={getShimmerAnim}
+          />
+        )
       })
-
-      return (
-        <TouchableOpacity
-          key={publicidad.iD_Publicidad || index}
-          style={styles.storyContainer}
-          onPress={() => handleStoryPress(publicidad)}
-          activeOpacity={0.7}
-        >
-          {!isViewed ? (
-            <View style={styles.gradientBorder}>
-              <LinearGradient
-                colors={["#f09433", "#e6683c", "#dc2743", "#cc2366", "#bc1888"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[StyleSheet.absoluteFill, { borderRadius: 34 }]}
-              />
-              <Animated.View style={[styles.shimmerOverlay, { transform: [{ rotate }] }]}>
-                <LinearGradient
-                  colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.9)", "rgba(255,255,255,0)"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[StyleSheet.absoluteFill, { borderRadius: 34 }]}
-                />
-              </Animated.View>
-              <View style={styles.storyImageContainer}>
-                <Image source={{ uri: imageUri }} style={styles.storyImage} resizeMode="cover" />
-              </View>
-            </View>
-          ) : (
-            <View style={styles.viewedBorder}>
-              <View style={styles.storyImageContainer}>
-                <Image source={{ uri: imageUri }} style={styles.storyImage} resizeMode="cover" />
-              </View>
-            </View>
-          )}
-          <Text numberOfLines={1} style={styles.storyName}>
-            {publicidad.comercio?.nombre || publicidad.comercio || "Comercio"}
-          </Text>
-        </TouchableOpacity>
-      )
-    })
-  }, [publicidades, viewedStories, handleStoryPress, convertBase64ToImage])
+      .filter(Boolean)
+  }, [publicidades, viewedStories, handleStoryPress, convertBase64ToImage, getShimmerAnim])
 
   if (isLoading) {
     return (
@@ -218,18 +246,59 @@ export default function BarStories({ onStoryPress }) {
   )
 }
 
+const StoryItem = memo(({ publicidad, imageUri, isViewed, onPress, getShimmerAnim }) => {
+  const shimmerAnim = getShimmerAnim(publicidad.iD_Publicidad)
+  const rotate = shimmerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  })
+
+  return (
+    <TouchableOpacity style={styles.storyContainer} onPress={() => onPress(publicidad)} activeOpacity={0.7}>
+      {!isViewed ? (
+        <View style={styles.gradientBorder}>
+          <LinearGradient
+            colors={["#f09433", "#e6683c", "#dc2743", "#cc2366", "#bc1888"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[StyleSheet.absoluteFill, { borderRadius: 34 }]}
+          />
+          <Animated.View style={[styles.shimmerOverlay, { transform: [{ rotate }] }]}>
+            <LinearGradient
+              colors={["rgba(255,255,255,0)", "rgba(255,255,255,0.9)", "rgba(255,255,255,0)"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[StyleSheet.absoluteFill, { borderRadius: 34 }]}
+            />
+          </Animated.View>
+          <View style={styles.storyImageContainer}>
+            <Image source={{ uri: imageUri }} style={styles.storyImage} resizeMode="cover" />
+          </View>
+        </View>
+      ) : (
+        <View style={styles.viewedBorder}>
+          <View style={styles.storyImageContainer}>
+            <Image source={{ uri: imageUri }} style={styles.storyImage} resizeMode="cover" />
+          </View>
+        </View>
+      )}
+      <Text numberOfLines={1} style={styles.storyName}>
+        {publicidad.comercio?.nombre || publicidad.comercio || "Comercio"}
+      </Text>
+    </TouchableOpacity>
+  )
+})
+
 const styles = StyleSheet.create({
-  loadingContainer: {
-    paddingVertical: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
   container: {
     paddingVertical: 8,
     paddingHorizontal: 8,
   },
   scrollView: {
     paddingHorizontal: 5,
+  },
+  scrollViewContent: {
+    paddingRight: 10,
   },
   storyContainer: {
     marginHorizontal: 6,
@@ -260,7 +329,6 @@ const styles = StyleSheet.create({
     borderRadius: 33,
     justifyContent: "center",
     alignItems: "center",
-    
   },
   storyImageContainer: {
     width: 62,
@@ -283,5 +351,17 @@ const styles = StyleSheet.create({
     textAlign: "center",
     width: 70,
   },
+  skeletonCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#333",
+  },
+  skeletonText: {
+    width: 50,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#333",
+    marginTop: 4,
+  },
 })
- 

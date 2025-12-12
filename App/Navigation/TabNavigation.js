@@ -42,13 +42,13 @@ export default function TabNavigation() {
       screenOptions={({ route }) => ({
         tabBarIcon: ({ color, size }) => {
           let iconName
-          if (route.name === "Home") {
+          if (route.name === "Inicio") {
             iconName = "home"
           } else if (route.name === "Reservas") {
             iconName = "event" 
-          } else if (route.name === "AdminPanel") {
+          } else if (route.name === "Panel Admin") {
             iconName = "admin-panel-settings"
-          } else if (route.name === "BarManagement") {
+          } else if (route.name === "Comercio") {
             iconName = "business"
           } else if (route.name === "Login" || route.name === "Profile") {
             iconName = isRegistered ? "person" : "login"
@@ -58,7 +58,7 @@ export default function TabNavigation() {
       })}
     >
       <Tab.Screen
-        name="Home"
+        name="Inicio"
         component={HomeNavigation}
         options={{ headerShown: false }}
         listeners={{
@@ -101,10 +101,10 @@ export default function TabNavigation() {
         />
       )}
 
-      {isAdmin && <Tab.Screen name="AdminPanel" component={AdminPanel} options={{ headerShown: false }} />}
+      {isAdmin && <Tab.Screen name="Panel Admin" component={AdminPanel} options={{ headerShown: false }} />}
 
       {isBarOwner && isApproved && (
-        <Tab.Screen name="BarManagement" component={BarManagement} options={{ headerShown: false }} />
+        <Tab.Screen name="Comercio" component={BarManagement} options={{ headerShown: false }} />
       )}
 
       <Tab.Screen
